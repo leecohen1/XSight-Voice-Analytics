@@ -1,0 +1,121 @@
+## ==============================
+## Environment variables / secrets
+## ==============================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+## ==============================
+## Python
+## ==============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+*/venv/
+*/.venv/
+
+## ==============================
+## Node / React / frontend
+## ==============================
+node_modules/
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+.npm/
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+## ==============================
+## Docker
+## ==============================
+*.pid
+docker-compose.override.yml
+
+## ==============================
+## Model weights / local AI artifacts
+## ==============================
+models/*.pt
+models/*.pth
+models/*.bin
+models/*.gguf
+models/*.onnx
+models/*.safetensors
+*.gguf
+*.ggml
+
+## ==============================
+## ChromaDB / vector store data
+## ==============================
+chroma_data/
+**/chroma_data/
+**/chroma_db/
+*.sqlite3
+*.duckdb
+
+## ==============================
+## Audio files
+## ==============================
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.aac
+demo/audio_samples/
+
+## ==============================
+## Local data artifacts
+## ==============================
+*.log
+logs/
+tmp/
+temp/
+.cache/
+
+## ==============================
+## OS / editor
+## ==============================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
