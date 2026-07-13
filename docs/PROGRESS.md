@@ -6,8 +6,8 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 
 | Phase | Description | Status |
 |---|---|---|
-| 1 | Repository structure | In progress |
-| 2 | README and project documentation | Not started |
+| 1 | Repository structure | Complete |
+| 2 | README and project documentation | In progress |
 | 3 | Technology decisions document | Not started |
 | 4 | Architecture document with Mermaid diagram | Not started |
 | 5 | Adapted CSV dataset | Not started |
@@ -34,8 +34,14 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 
 ## Phase log
 
-### Phase 1 — Repository structure (in progress)
+### Phase 1 — Repository structure (complete)
 
 Created the top-level repository structure: `frontend/`, `n8n/`, `services/` (with `rag_service/`, `call_signal_analyser/`, `guardrails_service/`, `langgraph_agent/`), `data/`, `models/`, `docs/`, `demo/`. Added placeholder `README.md` files to every main folder, a top-level `README.md` with project overview, `CLAUDE.md` with the full project specification, this `PROGRESS.md` file, and a `.gitignore` covering Python, Node, React, Docker, environment variables, model files, audio files, and local data artifacts (e.g. ChromaDB data).
 
-Awaiting user confirmation to mark Phase 1 complete.
+Confirmed by user. Committed as "Phase 1: Repository structure".
+
+### Phase 2 — README and project documentation (in progress)
+
+Expanded the top-level `README.md` into comprehensive project documentation (per user's choice of scope): added a "Why XSight" motivation section, detailed user personas, an example (abridged) output JSON, a system components section summarizing each service's role, an architecture overview, a documentation index table pointing to `CLAUDE.md` and planned Phase 3/4/20 docs, and a phase-grouped development roadmap table. Technology decisions and the detailed architecture diagram remain out of scope here — they are dedicated documents built in Phase 3 and Phase 4.
+
+Awaiting user confirmation to mark Phase 2 complete.
