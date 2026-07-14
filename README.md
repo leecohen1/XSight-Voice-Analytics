@@ -140,6 +140,7 @@ xsight-ai-sales-call-analytics/
 | [docs/PROGRESS.md](docs/PROGRESS.md) | Phase completion status and open decisions |
 | [docs/technology_decisions.md](docs/technology_decisions.md) | Rationale for each technology choice |
 | [docs/architecture.md](docs/architecture.md) | Detailed architecture, request lifecycle, deployment topology |
+| [docs/dataset_design.md](docs/dataset_design.md) | RAG corpus and classifier dataset design: taxonomies, schemas, distributions, generation and validation rules |
 | `docs/prompt_engineering_log.md` | Prompt iteration log across all prompting surfaces (Phase 20) |
 
 ## Development approach
@@ -149,7 +150,7 @@ The system is built in 20 phases, one at a time, with explicit approval required
 | Phases | Focus |
 |---|---|
 | 1–4 | Repository structure and project documentation |
-| 5 | Historical sales calls dataset |
+| 5A–5C | Historical sales calls dataset: design, generation, validation |
 | 6–8 | Mock FastAPI services, Docker Compose, testing docs |
 | 9–10 | Transcription API decision, n8n wiring |
 | 11–14 | Real service implementations: guardrails, RAG, signal analyser, LangGraph agent |

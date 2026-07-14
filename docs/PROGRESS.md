@@ -10,7 +10,9 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 | 2 | README and project documentation | Complete |
 | 3 | Technology decisions document | Complete |
 | 4 | Architecture document with Mermaid diagram | Complete |
-| 5 | Adapted CSV dataset | Not started |
+| 5A | Dataset Design | Complete |
+| 5B | Dataset Generation | Not started |
+| 5C | Dataset Validation | Not started |
 | 6 | FastAPI mock service skeletons | Not started |
 | 7 | Docker Compose for local backend services | Not started |
 | 8 | curl/Postman testing documentation | Not started |
@@ -115,3 +117,24 @@ Consequences applied: the n8n node list grew from 11 to 15 nodes (RAG Service, C
 No change to the overall architecture, node responsibilities elsewhere in the pipeline, or the LangGraph input/output JSON contract — this was a naming/clarity fix scoped to the internal graph structure only.
 
 Phase 4 complete. Confirmed by user. Committed as "Phase 4 complete: finalize LangGraph reasoning structure".
+
+### Phase 5A — Dataset Design (complete)
+
+Phase 5 was split into three sub-phases per the user's request: **5A Dataset Design**, **5B Dataset Generation**, **5C Dataset Validation** — reflecting that designing the data strategy, generating the actual CSV files, and validating them are distinct bodies of work worth tracking and approving separately.
+
+Created `docs/dataset_design.md`: the complete data strategy for both datasets, scoped to the fictional B2B SaaS sales-tooling product context (lead/customer management, sales automation, performance analytics, CRM integrations, AI sales tools). Covers:
+
+- Rationale for keeping `data/historical_sales_calls.csv` (RAG corpus) and `data/call_signal_training.csv` (classifier training data) as two separate files with a compatible column subset.
+- Four fictional agent profiles (Sarah Levi, Daniel Cohen, Michael Ben-David, Noa Friedman) with general styles and known limitations — explicitly no agent always succeeds or always fails, and `agent_name` is deliberately excluded from the classifier dataset to prevent identity leakage.
+- Full taxonomies: `sale_result` (3 values), `main_objection` (10 values), `customer_intent` (4 values), `customer_sentiment` (4 values), `closing_attempt` (4 values), `call_category` (6 values, with `Invalid Submission` explicitly excluded as guardrails-only).
+- Numeric score definitions (`agent_performance_score`, `objection_handling_quality`, `lead_quality_score`, all 1–5) with an explicit rule that sale outcome, agent performance, and lead quality are independent axes — enforced via required contrast cases.
+- Audio-derived feature definitions and realistic ranges (`call_duration_seconds`, `silence_ratio`, `speaking_rate_wpm`, `speech_to_non_speech_ratio`, `agent_talk_ratio`, `average_energy_level`), with the missing-vs-fabricated rule carried over from `CLAUDE.md`.
+- Planned distribution for the 24-call RAG corpus (8/8/8 by outcome; objection counts summing to 24) and 8 required contrast cases to keep retrieval grounded in transcript detail rather than superficial metadata.
+- Full column-by-column schemas for both files — 26 columns for `historical_sales_calls.csv`, 20 columns for `call_signal_training.csv` (16 features + 4 targets: `predicted_outcome_label`, `risk_level`, `lead_quality_score`, `agent_performance_score`) — each with type, allowed values/range, required/feature-or-target status, description, and example.
+- Synthetic generation rules (controlled variation, no exact/near-duplicates, no deterministic single-feature leakage, no agent identity leakage, class balance, realistic noise) and dataset validation rules (uniqueness, required fields, enum/range checks, transcript-label consistency, split-group integrity) for Phase 5C.
+- Proposed 70/15/15 train/validation/test split with a leakage-prevention rule: related synthetic variations of the same base profile stay together in one split.
+- The Phase 5B/5C execution plan.
+
+No CSV data was generated in this phase — design and schema only, per explicit instruction. Updated `README.md` (documentation index link, phase-focus table) and this file (phase table split into 5A/5B/5C) to reflect the new sub-phase structure.
+
+Phase 5A complete. Confirmed by user. Committed as "Phase 5A: Dataset design". Phase 5B has not been started.
