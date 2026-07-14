@@ -11,7 +11,9 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 | 3 | Technology decisions document | Complete |
 | 4 | Architecture document with Mermaid diagram | Complete |
 | 5A | Dataset Design | Complete |
-| 5B | Dataset Generation | Not started |
+| 5B | Dataset Generation | In progress |
+| 5B.0 | Historical call matrix design | Complete |
+| 5B.1 | Transcript and full CSV-row authoring | Not started |
 | 5C | Dataset Validation | Not started |
 | 6 | FastAPI mock service skeletons | Not started |
 | 7 | Docker Compose for local backend services | Not started |
@@ -138,3 +140,13 @@ Created `docs/dataset_design.md`: the complete data strategy for both datasets, 
 No CSV data was generated in this phase — design and schema only, per explicit instruction. Updated `README.md` (documentation index link, phase-focus table) and this file (phase table split into 5A/5B/5C) to reflect the new sub-phase structure.
 
 Phase 5A complete. Confirmed by user. Committed as "Phase 5A: Dataset design". Phase 5B has not been started.
+
+### Phase 5B.0 — Historical call matrix design (complete)
+
+Created `docs/historical_call_matrix.md`: a metadata-only planning matrix assigning all 24 planned RAG-corpus calls (per `docs/dataset_design.md` §12–§13) to a specific agent, customer segment, industry, company size, customer intent, main objection, customer sentiment, sale result, follow-up-needed flag, closing attempt, lead quality, decision-maker presence, and contrast-case role — before any transcript or CSV row is authored. No CSV files or transcripts were generated in this sub-phase.
+
+Verified in the document itself: outcome balance (8 Sale / 8 No Sale / 8 Follow-up Needed), perfect agent balance (6 calls per agent, exactly 2 of each outcome per agent — also satisfying the "no agent with only one outcome" validation rule), objection distribution matching dataset_design.md §12 exactly, and all 8 required contrast cases (§13) mapped to specific call IDs — including Case 7 (CALL_007 vs. CALL_009: same agent, same objection, similar intent, opposite outcome) and Case 8 (CALL_004 vs. CALL_010: same outcome, different objections). `agent_performance_score`, `objection_handling_quality`, `manager_notes`, audio-derived fields, and the transcripts themselves are explicitly deferred to Phase 5B.1, with per-row flags for the two contrast cases (5 and 6) that constrain a specific score direction.
+
+**Phase 5B.0 refinement (same day):** per user review, added a "Matrix Validation Status" checklist section at the end of the document (outcome/agent/objection/segment/industry/intent/sentiment/decision-maker diversity and contrast-case coverage, all verified), refined the CALL_014 (Case 6) wording from "the lead was already highly qualified and closed regardless of Michael's over-talking" to "the opportunity was already exceptionally strong before the conversation began, allowing the deal to close despite weaker sales execution" — separating opportunity quality from agent performance more cleanly — and added an explicit note that the matrix is the design blueprint for the RAG corpus, and every Phase 5B.1 transcript must remain fully consistent with it and with the Ground Truth Rules. No call assignments, outcomes, objections, distributions, or contrast cases were changed — wording and documentation only.
+
+Phase 5B.0 complete. Confirmed by user. Committed as "Phase 5B.0 refinement: finalize historical call matrix". Phase 5B.1 has not been started.
