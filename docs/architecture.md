@@ -132,9 +132,11 @@ A Merge Results node (node 11) waits for both branches to complete before contin
 
 n8n calls the LangGraph agent's `POST /agent/run`, passing the transcript, metadata, Gemini's structured extraction, the AI Agent Node's enrichment, the RAG Service's results, and the Call Signal Analyser's results. LangGraph does **not** call the RAG Service or Call Signal Analyser itself — by this point n8n has already fetched and merged both, in the previous step, and hands them to LangGraph as input. This is why LangGraph runs *after* the parallel RAG/Call-Signal-Analyser calls: it consumes both of their results rather than producing them. Internally:
 
-1. **Planner node** decides how to weigh the RAG evidence against the signal-analyser scores for this call.
-2. **Tool execution node** — in this design, "tools" are the already-provided RAG and Call Signal Analyser results, not live HTTP calls; this node reasons over that pre-fetched evidence.
-3. **Synthesizer node** cross-checks the RAG evidence against the signal-analyser scores, detects conflicting, missing, or insufficient evidence (populating `evidence_conflicts` if any), and produces `reasoning_steps`, `coaching_points`, and a `recommended_next_action`.
+1. **Planner Node** determines which evidence and questions must be evaluated.
+2. **Evidence Reconciliation Node** compares the transcript, Gemini's structured extraction, the AI Agent Node's enrichment, the RAG Service's results, and the Call Signal Analyser's results, detecting conflicts, missing evidence, and inconsistencies.
+3. **Synthesizer Node** produces `reasoning_steps`, `evidence_conflicts`, `coaching_points`, and a `recommended_next_action`.
+
+**Architecture note:** in this implementation, the generic Tool Execution step is adapted into an Evidence Reconciliation step because n8n performs the external HTTP tool calls before LangGraph is invoked.
 
 LangGraph returns this reasoning output to n8n — it is **not** the complete final report. See [CLAUDE.md §6](../CLAUDE.md#6-langgraph-sales-agent) for the exact shape.
 

@@ -459,9 +459,15 @@ Endpoint: `POST /agent/run`
 
 LangGraph performs multi-step reasoning over evidence n8n already fetched: it receives the transcript, metadata, Gemini's structured extraction, the n8n AI Agent Node's intent classification/enrichment, the RAG Service's results, and the Call Signal Analyser's results, and reasons over them — cross-checking the RAG evidence against the signal-analyser scores, detecting conflicting, missing, or insufficient evidence, and producing coaching points and a recommended next action. It does **not** generate the complete final report and does **not** replace the Gemini Final Analysis LLM Chain (n8n node 13) — that step takes LangGraph's reasoning output, together with the extraction and both AI services' results, and assembles the complete final output JSON. It may inspect the transcript for evidence verification and contextual reasoning, but it must not repeat Gemini's structured extraction as a separate analysis stage.
 
-Graph: Planner Node → Tool Execution Node → Synthesizer Node. In this design, "Tool Execution" means reasoning over the RAG and Call Signal Analyser results already provided in the request — not making live HTTP calls to those services.
+Graph: Planner Node → Evidence Reconciliation Node → Synthesizer Node.
 
-Tools (conceptual, reasoned over — not live-called by this service): RAG evidence (`services/rag_service`), Call Signal Analyser evidence (`services/call_signal_analyser`), Follow-up recommendation logic.
+- **Planner Node:** determines which evidence and questions must be evaluated.
+- **Evidence Reconciliation Node:** compares the transcript, Gemini's structured extraction, the n8n AI Agent Node's enrichment, the RAG Service's results, and the Call Signal Analyser's results; detects conflicts, missing evidence, and inconsistencies.
+- **Synthesizer Node:** produces `reasoning_steps`, `evidence_conflicts`, `coaching_points`, and `recommended_next_action`.
+
+**Architecture note:** In this implementation, the generic Tool Execution step is adapted into an Evidence Reconciliation step because n8n performs the external HTTP tool calls before LangGraph is invoked.
+
+Evidence reasoned over (already provided in the request, not live-called by this service): RAG evidence (`services/rag_service`), Call Signal Analyser evidence (`services/call_signal_analyser`), Follow-up recommendation logic.
 
 **LLM backend:** TBD — Phase 14. The Planner and Synthesizer nodes require an LLM call for reasoning and text generation (e.g. Gemini via API, or a separate/local model); the specific choice is deferred to implementation.
 

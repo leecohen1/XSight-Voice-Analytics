@@ -9,7 +9,7 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 | 1 | Repository structure | Complete |
 | 2 | README and project documentation | Complete |
 | 3 | Technology decisions document | Complete |
-| 4 | Architecture document with Mermaid diagram | In progress |
+| 4 | Architecture document with Mermaid diagram | Complete |
 | 5 | Adapted CSV dataset | Not started |
 | 6 | FastAPI mock service skeletons | Not started |
 | 7 | Docker Compose for local backend services | Not started |
@@ -104,4 +104,14 @@ Consequences applied: the n8n node list grew from 11 to 15 nodes (RAG Service, C
 
 **Note on user interaction during this correction:** an initial attempted edit renamed "LangGraph Agent" to "LangGraph Reasoning Agent" throughout `CLAUDE.md` for terminology consistency with the course flow; the user rejected that specific edit, so the component's existing name ("LangGraph Agent") was kept unchanged everywhere, and only the factual flow/role updates were applied.
 
-Phase 5 has not been started. Phase 4 remains in progress pending review of this correction.
+**Phase 4 final refinement — LangGraph internal node naming (same day):** the user pointed out that the LangGraph internal graph's middle node was still called "Tool Execution Node" even though LangGraph never makes live HTTP calls — n8n already calls the RAG Service and Call Signal Analyser before LangGraph is invoked. Renamed the internal graph structure consistently across `CLAUDE.md`, `docs/architecture.md`, and `services/langgraph_agent/README.md`:
+
+- **Planner Node** → **Evidence Reconciliation Node** → **Synthesizer Node** (was: Planner Node → Tool Execution Node → Synthesizer Node).
+- Planner Node: determines which evidence and questions must be evaluated.
+- Evidence Reconciliation Node: compares the transcript, Gemini's extraction, the AI Agent Node's enrichment, the RAG evidence, and the Call Signal Analyser results; detects conflicts, missing evidence, and inconsistencies.
+- Synthesizer Node: produces `reasoning_steps`, `evidence_conflicts`, `coaching_points`, and `recommended_next_action`.
+- Added the architecture note: "In this implementation, the generic Tool Execution step is adapted into an Evidence Reconciliation step because n8n performs the external HTTP tool calls before LangGraph is invoked."
+
+No change to the overall architecture, node responsibilities elsewhere in the pipeline, or the LangGraph input/output JSON contract — this was a naming/clarity fix scoped to the internal graph structure only.
+
+Phase 4 complete. Confirmed by user. Committed as "Phase 4 complete: finalize LangGraph reasoning structure".
