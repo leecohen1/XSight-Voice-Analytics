@@ -109,6 +109,23 @@ The final output is a full sales call analysis result displayed in a React websi
 
 ---
 
+## Ground Truth Rules
+
+Grounding is enforced at every layer of the system — the dataset, the RAG service, LangGraph's reasoning, and the Gemini Final Analysis LLM Chain. Every claim XSight makes must be traceable to real evidence; nothing is invented to fill a gap.
+
+- **The transcript is the single source of truth for every historical sales call.** All structured fields (`customer_intent`, `main_objection`, `customer_sentiment`, scores, etc.) describe what is in the transcript — they do not supply information the transcript itself doesn't support.
+- **Audio-derived features are a second, independent source of truth.** `call_duration_seconds`, `silence_ratio`, `speaking_rate_wpm`, and the other audio-derived features (Component 4) are measured from the audio file itself, not inferred from the transcript. A feature that cannot be measured must be marked missing/unknown — never fabricated or defaulted to fit an expected pattern (e.g. `silence_ratio` never silently defaults to `0.0`).
+- **Every structured field must be directly supported by the transcript or, for audio-derived features, by the audio file.** If a field can't be traced back to something said or implied in the call — or, for audio features, actually measured — it isn't a valid value for that row/result.
+- **No structured field may contradict the transcript.** A field's value must never assert something the transcript's content rules out.
+- **Manager/coaching notes may summarize the transcript but must never introduce new business facts.** Notes may restate or interpret what happened on the call; they must not add budgets, dates, names, or outcomes the transcript never mentioned.
+- **RAG responses may only use information that exists in the transcript or in retrieved historical calls, and every claim about a historical call must cite the specific `call_id` it came from.** An uncited claim is treated the same as an invented one — the RAG Service must not supplement its `insight` or `reason` text with anything outside the current transcript and the cited `historical_sales_calls.csv` rows (see Component 3's RAG rules below).
+- **When available evidence is insufficient to support a confident claim, the system must say so explicitly rather than guess.** The RAG Service returns "Not enough evidence" (Component 3), the Call Signal Analyser reports low confidence and `"Uncertain"` (Component 4), and the Router flags `human_review_required` (Component 2) when confidence or evidence is inadequate — uncertainty is a valid, expected output, not a failure to route around.
+- **Generated recommendations must be based only on available evidence.** Coaching feedback, the recommended next action, and the suggested follow-up email (LangGraph's reasoning output and the Final Analysis LLM Chain's assembly) must be derivable from the transcript, the structured extraction, the RAG evidence, and the Call Signal Analyser's scores — not invented to sound plausible.
+
+These rules apply both to how `data/historical_sales_calls.csv` is authored (see [docs/dataset_design.md](docs/dataset_design.md)) and to how the live pipeline behaves at inference time. The output guardrails (Component 5) are the structural enforcement of the live-pipeline side — rejecting invented CRM facts, unsupported conclusions, and missing citations — so grounding does not rely on prompt instruction alone.
+
+---
+
 ## Final chosen technology stack
 
 1. **Frontend:** React Web Application (built near end of project — not at the beginning)

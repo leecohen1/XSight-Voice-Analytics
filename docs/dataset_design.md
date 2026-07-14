@@ -1,8 +1,26 @@
 # XSight — Dataset Design (Phase 5A)
 
+**Author:** Lee Cohen
+
 This document defines the complete data strategy for XSight's two datasets: the RAG corpus (`data/historical_sales_calls.csv`) and the PyTorch classifier training dataset (`data/call_signal_training.csv`). It covers taxonomy definitions, agent profiles, planned distributions, full column schemas, synthetic-generation rules, and validation rules. **This is a design-only document — no CSV data is generated in this phase.** Dataset generation is Phase 5B; automated and manual validation is Phase 5C.
 
 See [CLAUDE.md §7](../CLAUDE.md#7-data-design) for the original data-design summary this document expands on, and [docs/PROGRESS.md](PROGRESS.md) for phase status.
+
+---
+
+## Ground Truth Rules (dataset authoring)
+
+[CLAUDE.md's Ground Truth Rules](../CLAUDE.md#ground-truth-rules) govern grounding across the whole system. For authoring `data/historical_sales_calls.csv` (Phase 5B) specifically, they mean:
+
+- **The transcript is the single source of truth for every row.** `sale_result`, `customer_intent`, `main_objection`, `customer_sentiment`, the numeric scores, and `manager_notes` must describe what that specific transcript actually contains — not a generic profile for the agent (§3) or a plausible-sounding default chosen to hit the planned distribution (§12).
+- **Audio-derived fields (§11) are a second, independent ground truth — not derived from the transcript.** `silence_ratio`, `speaking_rate_wpm`, and the other audio-derived columns describe the audio file, not the words spoken; a synthetic row that specifies a measured value for these fields must keep it within the realistic ranges in §11 and internally consistent with `call_duration_seconds` and `word_count`, not just plausible-looking in isolation.
+- **Every structured field must be directly supported by the transcript or, for audio-derived fields, be a realistic measured value.** A field with no traceable basis in the transcript text — or an audio value with no internally consistent basis — is not valid, no matter how well it fits the target distribution.
+- **No structured field may contradict the transcript.** E.g. `closing_attempt = strong` is invalid if the agent never makes a direct ask; `customer_sentiment = positive` is invalid if the customer's tone is clearly resistant.
+- **`manager_notes` may summarize the transcript but must never introduce new business facts.** A note may say "customer raised concern about integration timeline" if the transcript supports it; it must not add a budget figure, a competitor name, or a decision date the transcript never mentions.
+- **Where the transcript's own evidence is genuinely thin or mixed, the row must use the corresponding uncertain/moderate label rather than force a confident one.** `customer_intent = unclear` and `main_objection = none` exist in the taxonomies (§5, §6) specifically for this — a row should never be forced into `high` intent or a specific objection the transcript doesn't clearly support just to fit a target count.
+- **These are validation rules, not style guidelines.** §18's "Transcript consistent with objection, sentiment, intent, and result" and "Manager notes grounded in transcript" checks exist specifically to enforce them during Phase 5C — a row that fails either check must be rewritten, not patched with a looser label. §18's "no invalid citation IDs" check is the corpus-level counterpart: any `call_id` cited elsewhere must resolve to an actual row in this file, the same way the live RAG Service must cite a real, retrievable `call_id` for every claim it makes (Component 3, [Ground Truth Rules](../CLAUDE.md#ground-truth-rules)).
+
+The RAG-service-level and generation-level grounding rules apply at inference time, once the RAG Service and LangGraph are implemented (Phases 12 and 14) — enforced by those services' prompts and by the output guardrails, not by this dataset. But they depend on the dataset being authored to the same standard: a RAG service can only stay grounded, and can only correctly report "Not enough evidence" when appropriate, if the corpus it retrieves from is itself accurate to its own transcripts.
 
 ---
 
@@ -291,7 +309,27 @@ The Call Signal Analyser's PyTorch classifier is trained to predict four targets
 - **`lead_quality_score`** — 1–5 (§9); prospect fit, predicted independently of agent performance.
 - **`agent_performance_score`** — 1–5 (§9); agent execution quality, predicted independently of lead quality.
 
-Consistent with [CLAUDE.md §4](../CLAUDE.md#4-voice--call-signal-analyser), the trained model also produces a `confidence` value at inference time (not a column in the training data itself — it is a property of the model's prediction, not a ground-truth label) and falls back to `"Uncertain"` / human review when confidence is below 0.65.
+### Risk level definition
+
+`risk_level` describes the risk of losing the opportunity, not the call outcome itself — a `Follow-up Needed` call can be `Low` risk (strong signals, just not closed yet) just as easily as a `Sale` in progress can still carry `Medium` risk until it's fully committed.
+
+| Risk | Meaning |
+|---|---|
+| `Low` | Strong buying signals and low probability of losing the opportunity. |
+| `Medium` | Mixed evidence requiring follow-up or additional validation before the outcome is clear. |
+| `High` | Significant risk of losing the opportunity without intervention. |
+
+### Confidence interpretation
+
+Consistent with [CLAUDE.md §4](../CLAUDE.md#4-voice--call-signal-analyser), the trained model also produces a `confidence` value at inference time (not a column in the training data itself — it is a property of the model's prediction, not a ground-truth label). Confidence reflects how well the model's inputs agree with each other, not just how extreme the predicted class is:
+
+| Confidence | Interpretation |
+|---|---|
+| High | Strong agreement between transcript signals, structured fields, and the model's predictions — the evidence points consistently in one direction. |
+| Medium | Some conflicting evidence exists, but the prediction remains reasonably supported overall. |
+| Low | Missing features, contradictory evidence, or ambiguous customer behavior make the prediction unreliable. |
+
+Predictions below the confidence threshold (0.65) are reported as `"Uncertain"` and routed to human review, per the [Ground Truth Rules](../CLAUDE.md#ground-truth-rules) — low confidence is a valid, expected output when the evidence doesn't support a confident call, not a failure mode to be masked.
 
 ---
 
