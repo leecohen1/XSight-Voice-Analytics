@@ -89,9 +89,10 @@ Rationale for these choices is documented in `docs/technology_decisions.md` (Pha
 ## System components
 
 - **React web application** — upload form, results page, analytics dashboard, and an Ollama-powered assistant sidebar. Built last (Phase 16+).
-- **n8n Cloud workflow** — the central orchestrator. Calls every AI component directly: guardrails (both stages), transcription, Gemini extraction, the RAG Service and Call Signal Analyser (in parallel), the LangGraph agent, and a second Gemini call (Final Analysis LLM Chain) that assembles the complete result.
+- **n8n Cloud workflow** — the central orchestrator. Calls every AI component directly: guardrails (both stages), transcription, Gemini extraction, a limited-role AI Agent Node (intent classification and field enrichment), the RAG Service and Call Signal Analyser (in parallel), the LangGraph agent, and a second Gemini call (Final Analysis LLM Chain) that assembles the complete result.
 - **Sales Call RAG Service** (`services/rag_service`) — retrieves similar historical calls from ChromaDB with cited, grounded insights. Called directly by n8n, in parallel with the Call Signal Analyser.
 - **Voice / Call Signal Analyser** (`services/call_signal_analyser`) — PyTorch classifier producing outcome prediction, lead quality, agent performance, and risk scoring from transcript, structured-extraction, and lightweight audio-derived features (it preprocesses the audio file itself). Called directly by n8n, in parallel with the RAG Service.
+- **n8n AI Agent Node** — runs inside the n8n workflow, not a separate service. Limited role: classifies the submission intent, enriches the extracted fields, decides which downstream services are relevant, and prepares their request payloads — it does not reason over results or touch the final report.
 - **LangGraph Sales Agent** (`services/langgraph_agent`) — a multi-step reasoning layer, called by n8n after the RAG Service and Call Signal Analyser both return. Reasons over their results (evidence-conflict detection, coaching points, recommended action) but does not call other services and does not produce the final report — that's the Gemini Final Analysis Chain's job.
 - **Guardrails Service** (`services/guardrails_service`) — NeMo Guardrails + deterministic input/output validation (off-topic content, prompt injection, invented facts, missing citations, etc.).
 
@@ -102,13 +103,14 @@ Full endpoint contracts, request/response schemas, and the architecture diagram 
 ```
 User uploads audio → React → n8n Cloud → Pre-Transcription File Validation → Transcription
   → Post-Transcription Input Guardrails → Gemini Information Extractor (n8n)
-  → n8n calls RAG Service + Call Signal Analyser in parallel
+  → n8n AI Agent Node (intent classification, field enrichment — limited role)
+  → Parallel: RAG Service + Call Signal Analyser → Merge Results
   → LangGraph agent (multi-step reasoning over both results)
   → Gemini Final Analysis LLM Chain (assembles the complete result)
-  → Output Guardrails → Confidence & Category Routing → Results shown in React
+  → Output Guardrails → Router (confidence & category routing) → Results shown in React
 ```
 
-n8n is the central orchestrator and calls every AI component directly — the RAG Service, Call Signal Analyser, LangGraph agent, and both Gemini calls. No AI component calls another. A confidence threshold of 0.65 (plus evidence-conflict and guardrail checks) gates the pipeline: results that don't clear it are routed to `human_review_required` instead of being returned automatically. See [docs/architecture.md](docs/architecture.md) for the full Mermaid diagram and component-level detail.
+n8n is the central orchestrator and calls every AI component directly — the AI Agent Node, RAG Service, Call Signal Analyser, LangGraph agent, and both Gemini calls. No AI component calls another. A confidence threshold of 0.65 (plus evidence-conflict and guardrail checks) gates the pipeline: results that don't clear it are routed to `human_review_required` instead of being returned automatically. See [docs/architecture.md](docs/architecture.md) for the full Mermaid diagram and component-level detail.
 
 ## Repository structure
 

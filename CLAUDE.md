@@ -112,13 +112,13 @@ The final output is a full sales call analysis result displayed in a React websi
 ## Final chosen technology stack
 
 1. **Frontend:** React Web Application (built near end of project — not at the beginning)
-2. **Orchestration:** n8n Cloud — the central workflow orchestrator. Coordinates every step of the pipeline directly: guardrails (both stages), transcription, Gemini structured extraction, direct calls to the RAG Service and Call Signal Analyser (which may run in parallel), a call to the LangGraph agent for multi-step reasoning over their results, the Gemini Final Analysis LLM Chain that assembles everything into the complete final output, output guardrails, and confidence/category routing.
+2. **Orchestration:** n8n Cloud — the central workflow orchestrator. Coordinates every step of the pipeline directly: guardrails (both stages), transcription, Gemini structured extraction, an n8n AI Agent Node for intent classification and field enrichment (limited role — see Component responsibility boundaries), direct parallel calls to the RAG Service and Call Signal Analyser using the payloads the AI Agent Node prepared, a call to the LangGraph Reasoning Agent over their merged results, the Gemini Final Analysis LLM Chain that assembles everything into the complete final output, output guardrails, and a Router for confidence/category routing.
 3. **Transcription:** External API — TBD at Phase 9. Ask before implementing.
 4. **Gemini (via n8n):** used in two distinct roles, both orchestrated by n8n — never calls other services itself. (a) **Information Extractor:** structured semantic extraction only from the validated transcript (customer intent, main objection, customer sentiment, closing attempt, key sales events, relevant call metadata). (b) **Final Analysis LLM Chain:** combines the structured extraction, the RAG Service's results, the Call Signal Analyser's results, and the LangGraph agent's reasoning output into the complete final output JSON. Neither role generates coaching feedback or a final analysis on its own — extraction only extracts, and the Final Analysis Chain only synthesizes what n8n hands it.
 5. **Guardrails:** NeMo Guardrails + FastAPI + deterministic custom validation rules. NeMo Guardrails handles topic restrictions, unsafe content, prompt injection, jailbreak attempts, and other LLM-oriented input/output policies. Deterministic rules handle checks such as empty input, transcript length, missing citations, invalid schemas, unsupported file formats, and required fields. Input validation runs in two stages — pre-transcription file validation and post-transcription content guardrails — see Architecture flow.
 6. **RAG:** LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp. Embedding model: `sentence-transformers/all-MiniLM-L6-v2`. Retrieval of grounded historical-call evidence only — called directly by n8n (in parallel with the Call Signal Analyser), not by LangGraph.
 7. **Voice / Call Signal Analysis:** PyTorch feature-based classifier over an engineered feature vector — not a raw-audio deep learning model. Prediction, scoring, and confidence estimation only — called directly by n8n (in parallel with the RAG Service), not by LangGraph. Performs its own lightweight audio preprocessing internally (no separate preprocessing service) — n8n forwards the audio file (or a reference to it) to this service, so it has direct file access to compute audio-derived features itself. Combines transcript-derived / structured-extraction features (word count, question count, price/competitor mention counts, customer intent, main objection, customer sentiment, closing attempt, speaker-tagged agent_talk_ratio when diarization is available — sourced from Gemini's extraction, not independently re-derived) with lightweight audio-derived features (call duration, silence ratio, speaking rate, speech-to-non-speech ratio, pause duration, interruptions, optional average pitch/energy level). Audio preprocessing is lightweight, not full acoustic/deep-learning feature extraction. Features that are unavailable must be marked missing/unknown rather than fabricated — e.g. `silence_ratio` must never be silently defaulted to 0.0.
-8. **Agent:** LangGraph — a multi-step reasoning layer, called directly by n8n after the RAG Service and Call Signal Analyser have both returned. Receives the transcript, metadata, Gemini's structured extraction, the RAG results, and the Call Signal Analyser's results as input (it does not call those services itself), reasons over them (evidence-conflict detection, coaching points, recommended next action, reasoning steps), and returns that reasoning output — not the complete final report. The Gemini Final Analysis LLM Chain (not LangGraph) assembles the complete final output JSON. Exposed via FastAPI. LLM backend for the Planner/Synthesizer nodes: TBD — Phase 14.
+8. **Agent:** LangGraph — a multi-step reasoning layer, called directly by n8n after the parallel RAG Service and Call Signal Analyser calls have both returned and been merged. Receives the transcript, metadata, Gemini's structured extraction, the n8n AI Agent Node's intent classification/enrichment, the RAG results, and the Call Signal Analyser's results as input (it does not call those services itself), reasons over them (evidence-conflict detection, coaching points, recommended next action, reasoning steps), and returns that reasoning output — not the complete final report. The Gemini Final Analysis LLM Chain (not LangGraph) assembles the complete final output JSON. Exposed via FastAPI. LLM backend for the Planner/Synthesizer nodes: TBD — Phase 14.
 9. **Local Assistant:** Ollama — runs separately from Llama.cpp. Ollama serves the React sidebar assistant only. Llama.cpp runs inside the RAG service only. These are two separate runtimes and must not be merged.
 10. **Data:** CSV + ChromaDB. Two separate CSV files with related but distinct purposes — see Data Design (component 7).
 11. **Deployment:** Docker locally first, then AWS EC2
@@ -127,11 +127,12 @@ The final output is a full sales call analysis result displayed in a React websi
 
 ## Component responsibility boundaries
 
-- **n8n:** the central workflow orchestrator. Coordinates every AI call in the pipeline directly — guardrails (both stages), transcription, the Gemini Information Extractor, the RAG Service and Call Signal Analyser (in parallel), the LangGraph agent, the Gemini Final Analysis LLM Chain, output guardrails, and confidence/category routing.
+- **n8n:** the central workflow orchestrator. Coordinates every AI call in the pipeline directly — guardrails (both stages), transcription, the Gemini Information Extractor, the n8n AI Agent Node, the RAG Service and Call Signal Analyser (in parallel), the LangGraph agent, the Gemini Final Analysis LLM Chain, output guardrails, and the Router.
 - **Gemini Information Extractor (via n8n):** structured semantic extraction only — customer intent, main objection, customer sentiment, closing attempt, key sales events, and relevant call metadata from the validated transcript.
+- **n8n AI Agent Node:** a limited-role node running inside the n8n workflow (not a separate FastAPI service). It must: classify the submission intent, enrich the extracted sales fields, determine which downstream analysis services are relevant for this call, and prepare the structured payloads for those services. It must **not**: generate the final report, replace LangGraph's reasoning, generate coaching feedback, reconcile evidence, or invent missing information.
 - **RAG Service:** retrieval of grounded historical-call evidence only. Called directly by n8n.
 - **Call Signal Analyser:** prediction, scoring, and confidence estimation only — uses Gemini's structured extraction rather than re-deriving intent/objection/sentiment itself. Called directly by n8n.
-- **LangGraph Agent:** multi-step reasoning over the transcript, Gemini's extraction, and the already-fetched RAG/Call-Signal-Analyser results. Detects evidence conflicts, produces reasoning steps, coaching points, and a recommended next action. Does not call the RAG Service or Call Signal Analyser itself, and does not produce the complete final report.
+- **LangGraph Agent:** multi-step reasoning over the transcript, Gemini's extraction, the AI Agent Node's enrichment, and the already-fetched RAG/Call-Signal-Analyser results. Detects evidence conflicts, produces reasoning steps, coaching points, and a recommended next action. Does not call the RAG Service or Call Signal Analyser itself, and does not produce the complete final report.
 - **Gemini Final Analysis LLM Chain (via n8n):** combines the structured extraction, the RAG results, the Call Signal Analyser's results, and the LangGraph agent's reasoning output into the complete final output JSON schema.
 - **Guardrails Service:** input validation (both stages) and final-output validation only. Output guardrails validate the Gemini Final Analysis Chain's assembled result.
 
@@ -153,19 +154,21 @@ User uploads sales call audio
 → Transcription API (TBD Phase 9)
 → Post-Transcription Input Content Guardrails (NeMo + deterministic rules)
 → Gemini Information Extractor (structured extraction only)
-→ n8n coordinates parallel calls:
-  → HTTP Request to Sales Call RAG Service
-  → HTTP Request to Voice / Call Signal Analyser
-→ HTTP Request to LangGraph Agent (multi-step reasoning over the transcript,
-  extraction, RAG results, and Call Signal Analyser results)
-→ Gemini Final Analysis LLM Chain (combines extraction, RAG results,
+→ n8n AI Agent Node (intent classification and field enrichment — limited role, see below)
+→ Parallel HTTP Requests:
+  → Sales Call RAG Service
+  → Voice / Call Signal Analyser
+→ Merge Results
+→ LangGraph Agent (multi-step reasoning over the transcript,
+  extraction, enrichment, RAG results, and Call Signal Analyser results)
+→ Gemini Final Analysis LLM Chain (combines extraction, enrichment, RAG results,
   signal scores, and LangGraph's reasoning into the complete final output)
 → Output Guardrails Service (NeMo + deterministic rules)
-→ Confidence and Category Routing
+→ Router (confidence and category routing)
 → Results displayed in React website
 ```
 
-n8n calls every AI component directly and coordinates the whole pipeline. The RAG Service and Call Signal Analyser calls may run in parallel, since neither depends on the other's output — but both must complete before the LangGraph Agent call, since LangGraph needs both results as input. LangGraph does not call the RAG Service or Call Signal Analyser itself, and it does not produce the complete final report — the Gemini Final Analysis LLM Chain does that, using LangGraph's reasoning output as one of its inputs.
+n8n calls every AI component directly and coordinates the whole pipeline. The RAG Service and Call Signal Analyser calls may run in parallel, since neither depends on the other's output — but both must complete and be merged before the LangGraph Agent call, since LangGraph needs both results as input. LangGraph does not call the RAG Service or Call Signal Analyser itself, and it does not produce the complete final report — the Gemini Final Analysis LLM Chain does that, using LangGraph's reasoning output as one of its inputs. The n8n AI Agent Node runs once, between the Gemini Information Extractor and the parallel calls — it classifies the submission's intent, enriches the extracted fields, decides which of the two downstream services are relevant for this call, and prepares their request payloads; it does not reason over results, generate coaching feedback, or produce any part of the final report.
 
 **Note on staged input validation:** file-level checks (does the file exist, is it a supported audio format, is it within size/duration limits, are required metadata fields present) must run *before* transcription, since the transcript does not exist yet at that point. Content-level checks (empty/too-short transcript, off-topic content, offensive content, prompt injection) can only run *after* transcription, since they require the transcript text. See Guardrails Service (component 5) for the full breakdown of both stages.
 
@@ -187,19 +190,21 @@ flowchart LR
 
     D2 --> F["Gemini Information Extractor\nCustomer intent, objection, sentiment,\nclosing attempt, key sales events\nvia n8n — extraction only"]
 
-    F --> G["n8n Workflow Coordination\nParallel AI service calls"]
+    F --> AA["n8n AI Agent Node\nIntent classification, field enrichment,\nservice relevance, payload prep\nlimited role — no reasoning, no final report"]
 
-    G --> H["Sales Call RAG Service\nLangChain + ChromaDB + Llama.cpp"]
-    G --> I["Voice / Call Signal Analyser\nPyTorch — transcript + lightweight audio features"]
+    AA --> H["Sales Call RAG Service\nLangChain + ChromaDB + Llama.cpp"]
+    AA --> I["Voice / Call Signal Analyser\nPyTorch — transcript + lightweight audio features"]
 
-    H --> J["LangGraph Agent\nMulti-step reasoning over transcript,\nextraction, RAG + signal results\nFastAPI on AWS EC2"]
-    I --> J
+    H --> MG["Merge Results"]
+    I --> MG
 
-    J --> Z["Gemini Final Analysis LLM Chain\nCombines extraction, RAG evidence,\nsignal scores and LangGraph reasoning\ninto the complete final output JSON — via n8n"]
+    MG --> J["LangGraph Agent\nMulti-step reasoning over transcript,\nextraction, enrichment, RAG + signal results\nFastAPI on AWS EC2"]
+
+    J --> Z["Gemini Final Analysis LLM Chain\nCombines extraction, enrichment, RAG evidence,\nsignal scores and LangGraph reasoning\ninto the complete final output JSON — via n8n"]
 
     Z --> L["Output Guardrails Service\nNeMo Guardrails + deterministic rules"]
 
-    L --> R["Confidence & Category Routing\nconfidence < 0.65, conflicting evidence,\nmissing citations, severe guardrail flags"]
+    L --> R["Router\nConfidence & category routing —\nconfidence < 0.65, conflicting evidence,\nmissing citations, severe guardrail flags"]
 
     R --> M["Results Displayed in Website\nTranscript, insights, scores,\nsimilar calls, coaching feedback,\nfollow-up recommendation and routing"]
 
@@ -257,32 +262,46 @@ Orchestration layer. Receives the submission, calls services, manages the AI wor
 5. Post-Transcription Input Content Guardrails HTTP Request (NeMo + deterministic rules)
 6. IF pass/fail (content guardrails)
 7. Information Extractor — Gemini structured semantic extraction only (prompt engineering surface)
-8. HTTP Request to RAG Service (parallel branch)
-9. HTTP Request to Voice / Call Signal Analyser (parallel branch)
-10. Merge — join the RAG Service and Call Signal Analyser results before continuing
-11. HTTP Request to LangGraph Agent (multi-step reasoning over the transcript, metadata, Gemini's extraction, the RAG results, and the Call Signal Analyser results)
-12. Final Analysis LLM Chain — Gemini (combines the extraction, RAG results, Call Signal Analyser results, and LangGraph's reasoning output into the complete final output JSON; prompt engineering surface)
-13. Output Guardrails HTTP Request (NeMo + deterministic rules)
-14. IF safe / human review / category routing (Confidence & Category Routing)
-15. Respond to Webhook
+8. n8n AI Agent Node — intent classification and field enrichment (limited role — see below; prompt engineering surface)
+9. HTTP Request to RAG Service (parallel branch, using the payload the AI Agent Node prepared)
+10. HTTP Request to Voice / Call Signal Analyser (parallel branch, using the payload the AI Agent Node prepared)
+11. Merge Results — join the RAG Service and Call Signal Analyser results before continuing
+12. HTTP Request to LangGraph Agent (multi-step reasoning over the transcript, metadata, Gemini's extraction, the AI Agent Node's enrichment, the RAG results, and the Call Signal Analyser results — runs after the parallel calls because it consumes both results)
+13. Final Analysis LLM Chain — Gemini (combines the extraction, enrichment, RAG results, Call Signal Analyser results, and LangGraph's reasoning output into the complete final output JSON; prompt engineering surface)
+14. Output Guardrails HTTP Request (NeMo + deterministic rules)
+15. Router — confidence and category routing (IF safe / human review / category)
+16. Respond to Webhook
 
-Steps 2–3 (pre-transcription file validation) and 5–6 (post-transcription content guardrails) both call the Guardrails Service's `POST /check/input` endpoint, passing only the data available at that stage — see Guardrails Service (component 5) for the exact data available at each stage. Nodes 8 and 9 run in parallel, since the RAG Service and Call Signal Analyser calls don't depend on each other; node 10 waits for both before node 11 (the LangGraph Agent call) runs, since LangGraph needs both results as input. n8n calls the RAG Service, Call Signal Analyser, and LangGraph agent directly — none of them call each other.
+Steps 2–3 (pre-transcription file validation) and 5–6 (post-transcription content guardrails) both call the Guardrails Service's `POST /check/input` endpoint, passing only the data available at that stage — see Guardrails Service (component 5) for the exact data available at each stage. Nodes 9 and 10 run in parallel, since the RAG Service and Call Signal Analyser calls don't depend on each other; node 11 waits for both before node 12 (the LangGraph Agent call) runs, since LangGraph needs both results as input. n8n calls the RAG Service, Call Signal Analyser, and LangGraph agent directly — none of them call each other.
 
-**Confidence and category routing rule:** The n8n IF node (node 14) must route to `human_review_required` instead of returning the result directly whenever any of the following holds:
+**n8n AI Agent Node (node 8) — limited role.** This node runs entirely inside the n8n workflow — it is not a separate FastAPI service in `services/`. It must:
+- classify the submission intent
+- enrich the extracted sales fields
+- determine which downstream analysis services (RAG Service, Call Signal Analyser) are relevant for this call
+- prepare the structured payloads for those services
+
+It must **not**:
+- generate the final report
+- replace LangGraph's reasoning
+- generate coaching feedback
+- reconcile evidence
+- invent missing information
+
+**Confidence and category routing rule:** The Router (node 15) must route to `human_review_required` instead of returning the result directly whenever any of the following holds:
 - the Call Signal Analyser's confidence < 0.65
 - LangGraph detects conflicting evidence between the RAG Service and the Call Signal Analyser results (`evidence_conflicts` non-empty)
 - required supporting evidence or historical-call citations are missing
 - the output guardrails report a severe issue
 - a required upstream call (RAG Service, Call Signal Analyser, or LangGraph agent) fails and the Final Analysis Chain cannot produce a sufficiently grounded result
 
-Otherwise, node 14 assigns the final `routing_category` and returns the result with `guardrail_status: pass`.
+Otherwise, the Router assigns the final `routing_category` and returns the result with `guardrail_status: pass`.
 
 ### 3. Sales Call RAG Service
 
 Location: `services/rag_service`
 Stack: FastAPI, LangChain, ChromaDB, HuggingFace embeddings, Llama.cpp
 
-Called by: n8n, directly — in parallel with the Call Signal Analyser call. Not called by the LangGraph agent.
+Called by: n8n, directly — in parallel with the Call Signal Analyser call, using the payload the n8n AI Agent Node prepared. Not called by the LangGraph agent.
 
 Endpoint: `POST /query`
 
@@ -326,7 +345,7 @@ Output:
 Location: `services/call_signal_analyser`
 Stack: FastAPI, PyTorch, pandas, lightweight audio preprocessing (exact library finalized at Phase 13 — not librosa-scale acoustic feature extraction)
 
-Called by: n8n, directly — in parallel with the RAG Service call. Not called by the LangGraph agent.
+Called by: n8n, directly — in parallel with the RAG Service call, using the payload the n8n AI Agent Node prepared. Not called by the LangGraph agent.
 
 Endpoint: `POST /analyse-call`
 
@@ -409,7 +428,7 @@ The Guardrails service exposes a single `POST /check/input` endpoint that is inv
 - prompt injection or instruction-override attempts
 - supported language validation, if enabled
 
-`POST /check/output` validates the complete final output JSON assembled by the Gemini Final Analysis LLM Chain (n8n node 12, see component 2), before it is returned to the user.
+`POST /check/output` validates the complete final output JSON assembled by the Gemini Final Analysis LLM Chain (n8n node 13, see component 2), before it is returned to the user.
 
 **Output guardrails detect:**
 - invented CRM facts
@@ -434,11 +453,11 @@ Response format:
 Location: `services/langgraph_agent`
 Stack: FastAPI, LangGraph
 
-Called by: n8n, after the RAG Service and Call Signal Analyser calls have both returned (n8n node 11). LangGraph does not call the RAG Service or Call Signal Analyser itself — n8n fetches their results first and passes them in.
+Called by: n8n, after the parallel RAG Service and Call Signal Analyser calls have both returned and been merged (n8n node 12). LangGraph does not call the RAG Service or Call Signal Analyser itself — n8n fetches their results first and passes them in.
 
 Endpoint: `POST /agent/run`
 
-LangGraph performs multi-step reasoning over evidence n8n already fetched: it receives the transcript, metadata, Gemini's structured extraction, the RAG Service's results, and the Call Signal Analyser's results, and reasons over them — cross-checking the RAG evidence against the signal-analyser scores, detecting conflicting, missing, or insufficient evidence, and producing coaching points and a recommended next action. It does **not** generate the complete final report and does **not** replace the Gemini Final Analysis LLM Chain (n8n node 12) — that step takes LangGraph's reasoning output, together with the extraction and both AI services' results, and assembles the complete final output JSON. It may inspect the transcript for evidence verification and contextual reasoning, but it must not repeat Gemini's structured extraction as a separate analysis stage.
+LangGraph performs multi-step reasoning over evidence n8n already fetched: it receives the transcript, metadata, Gemini's structured extraction, the n8n AI Agent Node's intent classification/enrichment, the RAG Service's results, and the Call Signal Analyser's results, and reasons over them — cross-checking the RAG evidence against the signal-analyser scores, detecting conflicting, missing, or insufficient evidence, and producing coaching points and a recommended next action. It does **not** generate the complete final report and does **not** replace the Gemini Final Analysis LLM Chain (n8n node 13) — that step takes LangGraph's reasoning output, together with the extraction and both AI services' results, and assembles the complete final output JSON. It may inspect the transcript for evidence verification and contextual reasoning, but it must not repeat Gemini's structured extraction as a separate analysis stage.
 
 Graph: Planner Node → Tool Execution Node → Synthesizer Node. In this design, "Tool Execution" means reasoning over the RAG and Call Signal Analyser results already provided in the request — not making live HTTP calls to those services.
 
@@ -457,6 +476,11 @@ Input:
     "customer_sentiment": "...",
     "closing_attempt": "...",
     "key_sales_events": ["..."]
+  },
+  "agent_enrichment": {
+    "submission_intent": "...",
+    "enriched_fields": {},
+    "relevant_services": ["rag_service", "call_signal_analyser"]
   },
   "rag_results": {
     "similar_calls": [
@@ -500,7 +524,7 @@ Output — LangGraph's reasoning output, **not** the complete final report:
 }
 ```
 
-`evidence_conflicts` is non-empty when the RAG Service and Call Signal Analyser disagree (e.g. RAG evidence suggests a strong outcome but the signal analyser scores it as high-risk) or when supporting evidence/citations are insufficient — n8n's confidence and category routing (component 2) checks this field. The Gemini Final Analysis LLM Chain (n8n node 12) maps `coaching_points` and `recommended_next_action` into the final output schema's `coaching_feedback` and `recommended_next_action` fields, alongside everything else it assembles.
+`evidence_conflicts` is non-empty when the RAG Service and Call Signal Analyser disagree (e.g. RAG evidence suggests a strong outcome but the signal analyser scores it as high-risk) or when supporting evidence/citations are insufficient — the Router (n8n node 15, component 2) checks this field. The Gemini Final Analysis LLM Chain (n8n node 13) maps `coaching_points` and `recommended_next_action` into the final output schema's `coaching_feedback` and `recommended_next_action` fields, alongside everything else it assembles.
 
 ### 7. Data Design
 
@@ -534,11 +558,12 @@ Minimum 5 iterations per surface.
 
 **Surfaces:**
 1. n8n Information Extractor prompt (Gemini structured semantic extraction)
-2. n8n Final Analysis LLM Chain prompt (Gemini — combines extraction, RAG results, signal analysis, and LangGraph's reasoning output into the complete final output JSON)
-3. LangChain RAG prompt (citation and grounding instructions)
-4. NeMo Guardrails rail prompts (input + output)
-5. Ollama Assistant system prompt
-6. LangGraph reasoning prompt (multi-step reasoning over pre-fetched RAG and Call Signal Analyser results)
+2. n8n AI Agent Node prompt (intent classification and field enrichment — limited role, no reasoning or final output)
+3. n8n Final Analysis LLM Chain prompt (Gemini — combines extraction, enrichment, RAG results, signal analysis, and LangGraph's reasoning output into the complete final output JSON)
+4. LangChain RAG prompt (citation and grounding instructions)
+5. NeMo Guardrails rail prompts (input + output)
+6. Ollama Assistant system prompt
+7. LangGraph reasoning prompt (multi-step reasoning over pre-fetched RAG and Call Signal Analyser results)
 
 **Per surface include:**
 - goal
