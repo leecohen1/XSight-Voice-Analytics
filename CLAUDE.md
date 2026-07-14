@@ -348,7 +348,7 @@ Endpoints:
 
 NeMo Guardrails handles topic restrictions, unsafe content, prompt injection, and jailbreak/instruction-override attempts. Deterministic custom rules handle checks that don't need an LLM rail: empty input, transcript length, missing citations, invalid schemas, unsupported file formats, and required fields.
 
-`POST /check/input` is called at two distinct stages of the pipeline, with different data available at each — the endpoint stays a single endpoint, but callers must indicate the stage so the service applies the right checks:
+The Guardrails service exposes a single `POST /check/input` endpoint that is invoked at two different stages of the processing pipeline. During the first invocation (before transcription), the endpoint validates the uploaded audio file and submission metadata, including file type, file size, duration limits, required metadata, and submission integrity. During the second invocation (after transcription), the same endpoint validates the transcript content, including topic relevance, transcript quality, offensive content, prompt injection attempts, and other semantic checks. The validation logic is determined by the request payload and the data available at each stage, rather than by separate endpoints or by orchestration-specific logic. This keeps the external API simple while allowing the validation logic for each stage to evolve independently.
 
 **Stage A — Pre-transcription file validation** (runs before transcription; only the uploaded file and form metadata are available, there is no transcript yet). Deterministic checks only:
 - audio file exists
