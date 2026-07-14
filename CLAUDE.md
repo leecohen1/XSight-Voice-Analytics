@@ -115,9 +115,9 @@ The final output is a full sales call analysis result displayed in a React websi
 2. **Orchestration:** n8n Cloud
 3. **Transcription:** External API — TBD at Phase 9. Ask before implementing.
 4. **n8n LLM:** Gemini
-5. **Guardrails:** NeMo Guardrails + FastAPI (custom rule-based validation may supplement NeMo where needed)
+5. **Guardrails:** NeMo Guardrails + FastAPI + deterministic custom validation rules. NeMo Guardrails handles topic restrictions, unsafe content, prompt injection, jailbreak attempts, and other LLM-oriented input/output policies. Deterministic rules handle checks such as empty input, transcript length, missing citations, invalid schemas, unsupported file formats, and required fields. Input validation runs in two stages — pre-transcription file validation and post-transcription content guardrails — see Architecture flow.
 6. **RAG:** LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp. Embedding model: `sentence-transformers/all-MiniLM-L6-v2`
-7. **Voice / Call Signal Analysis:** PyTorch feature-based classifier. Audio features are derived from the transcript only — no librosa, no audio file processing in this service. Features derived from transcript: duration estimate from word count, agent_talk_ratio from speaker-tagged lines, speaking_rate_wpm, price_mentions_count, competitor_mentions_count.
+7. **Voice / Call Signal Analysis:** PyTorch feature-based classifier over an engineered feature vector — not a raw-audio deep learning model. Combines transcript-derived / structured-extraction features (word count, question count, price/competitor mention counts, customer intent, main objection, customer sentiment, closing attempt, speaker-tagged agent_talk_ratio when diarization is available) with lightweight audio-derived features (call duration, silence ratio, speaking rate, speech-to-non-speech ratio, optional average energy level). Audio preprocessing is lightweight, not full acoustic/deep-learning feature extraction. Features that are unavailable must be marked missing/unknown rather than fabricated — e.g. `silence_ratio` must never be silently defaulted to 0.0.
 8. **Agent:** LangGraph — planner → tool execution → synthesizer graph. Exposed via FastAPI.
 9. **Local Assistant:** Ollama — runs separately from Llama.cpp. Ollama serves the React sidebar assistant only. Llama.cpp runs inside the RAG service only. These are two separate runtimes and must not be merged.
 10. **Data:** CSV + ChromaDB
@@ -137,17 +137,20 @@ During local development, n8n Cloud cannot reach localhost directly. Expose loca
 User uploads sales call audio
 → React Web Application
 → n8n Cloud Workflow
-→ Input Guardrails Service (NeMo)
+→ Pre-Transcription File Validation (deterministic checks)
 → Transcription API (TBD Phase 9)
+→ Post-Transcription Input Content Guardrails (NeMo + deterministic rules)
 → Sales Call Understanding / Information Extraction (Gemini via n8n)
 → FastAPI AI Microservices on AWS EC2:
   → Sales Call RAG Service
   → Voice / Call Signal Analyser
   → LangGraph Sales Agent
 → Sales Call Analysis Results
-→ Output Guardrails Service (NeMo)
+→ Output Guardrails Service (NeMo + deterministic rules)
 → Results displayed in React website
 ```
+
+**Note on staged input validation:** file-level checks (does the file exist, is it a supported audio format, is it within size/duration limits, are required metadata fields present) must run *before* transcription, since the transcript does not exist yet at that point. Content-level checks (empty/too-short transcript, off-topic content, offensive content, prompt injection) can only run *after* transcription, since they require the transcript text. See Guardrails Service (component 5) for the full breakdown of both stages.
 
 ### Architecture Mermaid diagram
 
@@ -159,17 +162,19 @@ flowchart LR
 
     B --> C["n8n Workflow\nOrchestration Layer"]
 
-    C --> D["Input Guardrails Service\nNeMo Guardrails + FastAPI"]
+    C --> D1["Pre-Transcription\nFile Validation\nDeterministic checks"]
 
-    D --> E["Transcription\nAudio to Text\nTBD — Phase 9"]
+    D1 --> E["Transcription\nAudio to Text\nTBD — Phase 9"]
 
-    E --> F["Sales Call Understanding\nExtract intent, objection,\nsentiment and call metadata\nGemini via n8n"]
+    E --> D2["Post-Transcription\nInput Content Guardrails\nNeMo Guardrails + deterministic rules"]
+
+    D2 --> F["Sales Call Understanding\nExtract intent, objection,\nsentiment and call metadata\nGemini via n8n"]
 
     F --> G["AI Services\nFastAPI Microservices on AWS EC2"]
 
     G --> H["Sales Call RAG Service\nLangChain + ChromaDB + Llama.cpp"]
 
-    G --> I["Voice / Call Signal Analyser\nPyTorch — transcript-derived features"]
+    G --> I["Voice / Call Signal Analyser\nPyTorch — transcript + lightweight audio features"]
 
     G --> J["LangGraph Sales Agent\nReasoning and recommendations"]
 
@@ -177,7 +182,7 @@ flowchart LR
     I --> K
     J --> K
 
-    K --> L["Output Guardrails Service\nNeMo Guardrails + FastAPI"]
+    K --> L["Output Guardrails Service\nNeMo Guardrails + deterministic rules"]
 
     L --> M["Results Displayed in Website\nTranscript, insights, scores,\nsimilar calls, coaching feedback,\nfollow-up recommendation and routing"]
 
@@ -227,19 +232,23 @@ Orchestration layer. Receives the submission, calls services, manages the AI wor
 
 **Planned n8n nodes:**
 1. Webhook Trigger
-2. Input Guardrails HTTP Request (NeMo)
-3. IF pass/fail
+2. Pre-Transcription File Validation HTTP Request (deterministic checks — file exists, MIME type/extension, size limit, optional duration limit, required metadata)
+3. IF pass/fail (file validation)
 4. Transcription API HTTP Request (TBD Phase 9)
-5. Information Extractor — Gemini (prompt engineering surface)
-6. HTTP Request to RAG Service
-7. HTTP Request to Call Signal Analyser
-8. HTTP Request to LangGraph Agent
-9. Final Analysis Generation — Gemini (prompt engineering surface)
-10. Output Guardrails HTTP Request (NeMo)
-11. IF safe / human review
-12. Respond to Webhook
+5. Post-Transcription Input Content Guardrails HTTP Request (NeMo + deterministic rules)
+6. IF pass/fail (content guardrails)
+7. Information Extractor — Gemini (prompt engineering surface)
+8. HTTP Request to RAG Service
+9. HTTP Request to Call Signal Analyser
+10. HTTP Request to LangGraph Agent
+11. Final Analysis Generation — Gemini (prompt engineering surface)
+12. Output Guardrails HTTP Request (NeMo + deterministic rules)
+13. IF safe / human review
+14. Respond to Webhook
 
-**Confidence routing rule:** If the Call Signal Analyser returns confidence < 0.65, the n8n IF node (node 11) must route to `human_review_required` instead of returning the result directly.
+Steps 2–3 (pre-transcription file validation) and 5–6 (post-transcription content guardrails) both call the Guardrails Service's `POST /check/input` endpoint, passing only the data available at that stage — see Guardrails Service (component 5) for the exact data available at each stage.
+
+**Confidence routing rule:** If the Call Signal Analyser returns confidence < 0.65, the n8n IF node (node 13) must route to `human_review_required` instead of returning the result directly.
 
 ### 3. Sales Call RAG Service
 
@@ -286,23 +295,29 @@ Output:
 ### 4. Voice / Call Signal Analyser
 
 Location: `services/call_signal_analyser`
-Stack: FastAPI, PyTorch, pandas
+Stack: FastAPI, PyTorch, pandas, lightweight audio preprocessing (exact library finalized at Phase 13 — not librosa-scale acoustic feature extraction)
 
 Endpoint: `POST /analyse-call`
 
-All features are derived from the transcript text only. No audio file is processed by this service.
+The classifier is a feature-based model over an engineered feature vector — not a raw-audio deep learning model (no waveform/spectrogram input, no acoustic deep learning). Features come from three sources: transcript-derived features, structured fields already extracted upstream by Gemini, and lightweight audio-derived features computed from the original audio file. A feature that cannot be computed for a given call (e.g. no diarization tags in the transcript, or the audio file is unavailable) must be marked missing/unknown in the request/response, never fabricated or silently defaulted.
 
-**Transcript-derived features:**
-- `call_duration_seconds`: estimated from word count (average 130 wpm)
-- `silence_ratio`: not available from transcript — set to 0.0 and note limitation
-- `speaking_rate_wpm`: word count / estimated duration
-- `agent_talk_ratio`: agent word count / total word count (requires Agent:/Customer: tagged transcript)
+**Transcript-derived and structured-extraction features:**
+- `word_count`
+- `question_count`
 - `price_mentions_count`: keyword count
 - `competitor_mentions_count`: keyword count
 - `customer_intent`: encoded from extracted field
 - `main_objection`: encoded from extracted field
 - `customer_sentiment`: encoded from extracted field
 - `closing_attempt`: encoded from extracted field
+- `agent_talk_ratio`: agent word count / total word count — only computable when the transcript is speaker-tagged (Agent:/Customer:); marked missing/unknown otherwise
+
+**Lightweight audio-derived features:**
+- `call_duration_seconds`: measured directly from the audio file when available; falling back to a word-count-based estimate only when the audio file is unavailable, and explicitly flagged as an estimate in that case (never presented as a measured value)
+- `silence_ratio`: measured via lightweight silence/energy detection on the audio file; marked missing/unknown if the audio file is unavailable — must never be silently defaulted to 0.0
+- `speaking_rate_wpm`: word count / actual audio duration
+- `speech_to_non_speech_ratio`
+- `average_energy_level` (optional)
 
 Output:
 ```json
@@ -325,18 +340,31 @@ If confidence < 0.65: return "Uncertain" and flag for human review.
 ### 5. Guardrails Service
 
 Location: `services/guardrails_service`
-Stack: FastAPI, NeMo Guardrails
+Stack: FastAPI, NeMo Guardrails, deterministic custom validation rules
 
 Endpoints:
 - `POST /check/input`
 - `POST /check/output`
 
-**Input guardrails detect:**
-- empty or too-short transcript
-- off-topic or non-sales-call content
-- offensive content
-- prompt injection attempts
-- unsupported metadata or invalid file information
+NeMo Guardrails handles topic restrictions, unsafe content, prompt injection, and jailbreak/instruction-override attempts. Deterministic custom rules handle checks that don't need an LLM rail: empty input, transcript length, missing citations, invalid schemas, unsupported file formats, and required fields.
+
+`POST /check/input` is called at two distinct stages of the pipeline, with different data available at each — the endpoint stays a single endpoint, but callers must indicate the stage so the service applies the right checks:
+
+**Stage A — Pre-transcription file validation** (runs before transcription; only the uploaded file and form metadata are available, there is no transcript yet). Deterministic checks only:
+- audio file exists
+- supported MIME type and extension
+- file size limit
+- optional duration limit
+- required metadata validation (agent name, call date, etc.)
+- invalid or suspicious submission structure
+
+**Stage B — Post-transcription input content guardrails** (runs after transcription; the transcript text is available). NeMo rails + deterministic checks:
+- transcript is not empty or too short
+- content is a sales call
+- off-topic content detection
+- offensive content detection
+- prompt injection or instruction-override attempts
+- supported language validation, if enabled
 
 **Output guardrails detect:**
 - invented CRM facts
@@ -396,11 +424,17 @@ Output:
 
 Location: `data/historical_sales_calls.csv`
 
-All content in English. The dataset must support both RAG retrieval and PyTorch classification.
+All content in English. The dataset must support both RAG retrieval and PyTorch classification, and is deliberately split into two parts that serve different purposes — the project does not contain 150–300 complete transcripts.
 
-**Structure:**
-- 20–30 detailed records with full transcripts for RAG retrieval quality
-- An additional 150–300 synthetic rows with features and labels only (no full transcript) for PyTorch classifier training
+**RAG corpus** (used for ChromaDB retrieval and citation-based generation):
+- at least 20 detailed historical sales call transcripts, up to 30
+- rich metadata per call
+
+**Classifier dataset** (used for PyTorch training only — features and labels, no full transcript):
+- approximately 150–300 synthetic or adapted feature rows, generated through controlled variations rather than duplicated boilerplate
+- labels and features must remain logically consistent with each other
+- split into train/validation/test sets
+- no duplicate-row leakage across splits
 
 **Columns:**
 `call_id, agent_name, transcript, call_duration_seconds, sale_result, customer_intent, main_objection, customer_sentiment, agent_performance_score, objection_handling_quality, closing_attempt, follow_up_needed, lead_quality_score, call_category, silence_ratio, speaking_rate_wpm, agent_talk_ratio, price_mentions_count, competitor_mentions_count, risk_level, predicted_outcome_label`
