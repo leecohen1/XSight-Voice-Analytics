@@ -7,8 +7,8 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 | Phase | Description | Status |
 |---|---|---|
 | 1 | Repository structure | Complete |
-| 2 | README and project documentation | In progress |
-| 3 | Technology decisions document | Not started |
+| 2 | README and project documentation | Complete |
+| 3 | Technology decisions document | In progress |
 | 4 | Architecture document with Mermaid diagram | Not started |
 | 5 | Adapted CSV dataset | Not started |
 | 6 | FastAPI mock service skeletons | Not started |
@@ -40,8 +40,14 @@ Created the top-level repository structure: `frontend/`, `n8n/`, `services/` (wi
 
 Confirmed by user. Committed as "Phase 1: Repository structure".
 
-### Phase 2 — README and project documentation (in progress)
+### Phase 2 — README and project documentation (complete)
 
 Expanded the top-level `README.md` into comprehensive project documentation (per user's choice of scope): added a "Why XSight" motivation section, detailed user personas, an example (abridged) output JSON, a system components section summarizing each service's role, an architecture overview, a documentation index table pointing to `CLAUDE.md` and planned Phase 3/4/20 docs, and a phase-grouped development roadmap table. Technology decisions and the detailed architecture diagram remain out of scope here — they are dedicated documents built in Phase 3 and Phase 4.
 
-Awaiting user confirmation to mark Phase 2 complete.
+Confirmed by user. Committed as "Phase 2: README and project documentation".
+
+### Phase 3 — Technology decisions document (in progress)
+
+Created `docs/technology_decisions.md`: for every layer of the chosen stack (frontend, orchestration, transcription, n8n LLM, guardrails, RAG, call signal analysis, agent, local assistant, data, deployment), documents the alternatives considered, why the chosen technology won, and the trade-off accepted. Opens with a "Guiding constraints" section (local-first development, grounded/non-hallucinated output, breadth of AI engineering techniques, two separated local LLM runtimes) that explains the reasoning pattern applied throughout, and closes with a summary table. Updated the README documentation index to link directly to this file.
+
+Awaiting user confirmation to mark Phase 3 complete.

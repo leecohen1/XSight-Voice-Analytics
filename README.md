@@ -133,7 +133,7 @@ xsight-ai-sales-call-analytics/
 |---|---|
 | [CLAUDE.md](CLAUDE.md) | Full project specification: architecture, schemas, phase plan — source of truth |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | Phase completion status and open decisions |
-| `docs/technology_decisions.md` | Rationale for each technology choice (Phase 3) |
+| [docs/technology_decisions.md](docs/technology_decisions.md) | Rationale for each technology choice |
 | `docs/architecture.md` | Detailed architecture with Mermaid diagram (Phase 4) |
 | `docs/prompt_engineering_log.md` | Prompt iteration log across all prompting surfaces (Phase 20) |
 
