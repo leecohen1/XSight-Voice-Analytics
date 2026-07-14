@@ -6,8 +6,8 @@ LangGraph Sales Agent.
 
 **Stack:** FastAPI, LangGraph.
 
-**Role:** the system's single AI orchestrator and final synthesis layer — called once per request by n8n. Not just a reasoning helper: this service decides which tools are needed, invokes the RAG Service and Call Signal Analyser itself (n8n never calls them directly), reconciles their evidence, and returns the complete final output JSON.
+**Role:** a multi-step reasoning layer — called by n8n after the RAG Service and Call Signal Analyser have both already returned. This service does not call those services itself; n8n fetches their results first and passes them in. It reasons over the transcript, Gemini's extraction, the RAG results, and the Call Signal Analyser's results, but does **not** produce the complete final report — that's the Gemini Final Analysis LLM Chain's job (a separate n8n node), using this service's reasoning output as one of its inputs.
 
-**Endpoint:** `POST /agent/run` — runs a Planner → Tool Execution → Synthesizer graph over the call transcript, metadata, and Gemini's structured extraction, using the RAG tool, Call Signal Analyser tool, and Follow-up recommendation tool, to detect conflicting/missing evidence and produce the complete analysis result: coaching feedback, recommended next action, follow-up email, and the rest of the final output schema, plus `reasoning_steps` and `tools_used` for transparency.
+**Endpoint:** `POST /agent/run` — runs a Planner → Tool Execution → Synthesizer graph over the call transcript, metadata, Gemini's structured extraction, the RAG Service's results, and the Call Signal Analyser's results (received as input, not fetched live), to detect conflicting/missing evidence and produce a reasoning output: `answer`, `evidence_used`, `reasoning_steps`, `evidence_conflicts`, `recommended_next_action`, and `coaching_points`.
 
 See [CLAUDE.md](../../CLAUDE.md#6-langgraph-sales-agent) for the full input/output contract.

@@ -6,7 +6,7 @@ Sales Call RAG Service.
 
 **Stack:** FastAPI, LangChain, ChromaDB, HuggingFace embeddings (`sentence-transformers/all-MiniLM-L6-v2`), Llama.cpp.
 
-**Called by:** the LangGraph agent only, as a tool. Not called directly by n8n.
+**Called by:** n8n, directly — in parallel with the Call Signal Analyser. Not called by the LangGraph agent.
 
 **Endpoint:** `POST /query` — given a transcript and metadata, retrieves similar historical sales calls from ChromaDB and returns a grounded, cited insight.
 

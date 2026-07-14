@@ -75,13 +75,13 @@ See [CLAUDE.md](CLAUDE.md) for the full JSON schema.
 | Frontend | React |
 | Orchestration | n8n Cloud |
 | Transcription | External API (TBD — Phase 9) |
-| Structured extraction LLM | Gemini (extraction only, via n8n) |
+| LLM (via n8n) | Gemini — Information Extractor + Final Analysis LLM Chain |
 | Guardrails | NeMo Guardrails + FastAPI |
 | RAG | LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp |
-| Call signal analysis | PyTorch (transcript-derived features) |
+| Call signal analysis | PyTorch (transcript + structured + lightweight audio features) |
 | Agent reasoning | LangGraph + FastAPI |
 | Local assistant | Ollama |
-| Data | CSV + ChromaDB |
+| Data | Two CSV files (RAG corpus + classifier training) + ChromaDB |
 | Deployment | Docker (local) → AWS EC2 |
 
 Rationale for these choices is documented in `docs/technology_decisions.md` (Phase 3).
@@ -89,10 +89,10 @@ Rationale for these choices is documented in `docs/technology_decisions.md` (Pha
 ## System components
 
 - **React web application** — upload form, results page, analytics dashboard, and an Ollama-powered assistant sidebar. Built last (Phase 16+).
-- **n8n Cloud workflow** — operational orchestration only: guardrails (both stages), transcription, Gemini extraction, and a single call into the LangGraph agent. Does not call the RAG Service or Call Signal Analyser directly.
-- **LangGraph Sales Agent** (`services/langgraph_agent`) — the system's single AI orchestrator and final synthesis layer. Planner → Tool Execution → Synthesizer graph that invokes the RAG Service and Call Signal Analyser as tools, reconciles their evidence, and produces the complete analysis result (coaching feedback, next actions, follow-up email, and more).
-- **Sales Call RAG Service** (`services/rag_service`) — retrieves similar historical calls from ChromaDB with cited, grounded insights. Called by LangGraph only.
-- **Voice / Call Signal Analyser** (`services/call_signal_analyser`) — PyTorch classifier producing outcome prediction, lead quality, agent performance, and risk scoring from transcript, structured-extraction, and lightweight audio-derived features. Called by LangGraph only.
+- **n8n Cloud workflow** — the central orchestrator. Calls every AI component directly: guardrails (both stages), transcription, Gemini extraction, the RAG Service and Call Signal Analyser (in parallel), the LangGraph agent, and a second Gemini call (Final Analysis LLM Chain) that assembles the complete result.
+- **Sales Call RAG Service** (`services/rag_service`) — retrieves similar historical calls from ChromaDB with cited, grounded insights. Called directly by n8n, in parallel with the Call Signal Analyser.
+- **Voice / Call Signal Analyser** (`services/call_signal_analyser`) — PyTorch classifier producing outcome prediction, lead quality, agent performance, and risk scoring from transcript, structured-extraction, and lightweight audio-derived features (it preprocesses the audio file itself). Called directly by n8n, in parallel with the RAG Service.
+- **LangGraph Sales Agent** (`services/langgraph_agent`) — a multi-step reasoning layer, called by n8n after the RAG Service and Call Signal Analyser both return. Reasons over their results (evidence-conflict detection, coaching points, recommended action) but does not call other services and does not produce the final report — that's the Gemini Final Analysis Chain's job.
 - **Guardrails Service** (`services/guardrails_service`) — NeMo Guardrails + deterministic input/output validation (off-topic content, prompt injection, invented facts, missing citations, etc.).
 
 Full endpoint contracts, request/response schemas, and the architecture diagram are in [CLAUDE.md](CLAUDE.md).
@@ -101,12 +101,14 @@ Full endpoint contracts, request/response schemas, and the architecture diagram 
 
 ```
 User uploads audio → React → n8n Cloud → Pre-Transcription File Validation → Transcription
-  → Post-Transcription Input Guardrails → Gemini structured extraction (n8n)
-  → LangGraph agent (invokes RAG Service + Call Signal Analyser as tools, synthesizes result)
-  → Output Guardrails → Confidence & Human-Review Routing → Results shown in React
+  → Post-Transcription Input Guardrails → Gemini Information Extractor (n8n)
+  → n8n calls RAG Service + Call Signal Analyser in parallel
+  → LangGraph agent (multi-step reasoning over both results)
+  → Gemini Final Analysis LLM Chain (assembles the complete result)
+  → Output Guardrails → Confidence & Category Routing → Results shown in React
 ```
 
-n8n makes exactly one call into AI reasoning — to the LangGraph agent; LangGraph is the only component that calls the RAG Service and Call Signal Analyser. A confidence threshold of 0.65 (plus evidence-conflict and guardrail checks) gates the pipeline: results that don't clear it are routed to `human_review_required` instead of being returned automatically. See [docs/architecture.md](docs/architecture.md) for the full Mermaid diagram and component-level detail.
+n8n is the central orchestrator and calls every AI component directly — the RAG Service, Call Signal Analyser, LangGraph agent, and both Gemini calls. No AI component calls another. A confidence threshold of 0.65 (plus evidence-conflict and guardrail checks) gates the pipeline: results that don't clear it are routed to `human_review_required` instead of being returned automatically. See [docs/architecture.md](docs/architecture.md) for the full Mermaid diagram and component-level detail.
 
 ## Repository structure
 
@@ -120,7 +122,7 @@ xsight-ai-sales-call-analytics/
 │   ├── call_signal_analyser/  ← Voice / Call Signal Analyser
 │   ├── guardrails_service/    ← NeMo Guardrails Service
 │   └── langgraph_agent/       ← LangGraph Sales Agent
-├── data/                      ← historical sales calls dataset
+├── data/                      ← historical_sales_calls.csv (RAG) + call_signal_training.csv (classifier)
 ├── models/                    ← trained model artifacts (not committed)
 ├── docs/                      ← project documentation
 ├── demo/                      ← demo assets and script
