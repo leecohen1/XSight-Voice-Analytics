@@ -126,6 +126,84 @@ These rules apply both to how `data/historical_sales_calls.csv` is authored (see
 
 ---
 
+## Transcript Writing Guidelines
+
+These guidelines govern how historical call transcripts (`data/historical_sales_calls.csv`, authored in Phase 5B.1) are written. They apply **starting from Batch 2 onward** — Batch 1 (`docs/generated_calls_batch_01.md`, CALL_001–CALL_004) was reviewed and approved on its business content, metadata, Ground Truth consistency, and contrast cases, but its prose style was found too uniform across conversations and is not rewritten retroactively.
+
+The goal is to ensure that future transcripts read like independent real conversations rather than examples written by the same author.
+
+### Authentic conversation
+
+- Write conversations as if they were transcribed from real business calls.
+- Prioritize realism over perfect sales methodology.
+- Natural imperfections are encouraged.
+
+### Dialogue diversity
+
+Every customer should have a distinct communication style. Some customers:
+
+- answer briefly
+- interrupt
+- over-explain
+- hesitate
+- change topics
+- speak emotionally
+- speak analytically
+- ask many questions
+- answer with only a few words
+
+The sales representative should also vary naturally between calls while remaining consistent with their overall selling style.
+
+### Avoid reusable templates
+
+Do not repeatedly use sentence patterns such as:
+
+- "That's fair..."
+- "Understood."
+- "That's helpful."
+- "Got it."
+- "I appreciate you being..."
+- "I'd rather ... than ..."
+- "Can I ask..."
+- "That's a common..."
+
+Do not repeatedly acknowledge every customer statement in the same way. Do not always summarize before asking the next question. Do not always use the same transition phrases. Each conversation should sound independently authored.
+
+### Natural spoken language
+
+Use contractions naturally. Occasionally include:
+
+- short pauses
+- self-corrections
+- incomplete thoughts
+- informal transitions
+- conversational fillers when appropriate
+
+Avoid making every sentence perfectly structured.
+
+### Customer individuality
+
+Each customer should have:
+
+- different vocabulary
+- different sentence length
+- different level of technical knowledge
+- different communication style
+- different level of patience
+- different emotional tone
+
+The reader should be able to recognize different customers without looking at their names.
+
+### Sales representative consistency
+
+Keep each sales representative consistent with their overall selling style, but avoid making them sound identical in every conversation. A representative should not have signature phrases that repeat across transcripts.
+
+### Independent generation
+
+When generating future transcripts, treat every conversation as an independent writing task. Do not imitate wording, sentence structure, or dialogue rhythm from previously generated calls. The objective is corpus diversity, not stylistic consistency.
+
+---
+
 ## Final chosen technology stack
 
 1. **Frontend:** React Web Application (built near end of project — not at the beginning)
