@@ -10,6 +10,7 @@ A few constraints shaped every decision below:
 - **Grounded, non-hallucinated output.** XSight makes claims about historical sales calls and gives coaching advice; the stack had to support retrieval-grounded generation with citations and explicit guardrails, not open-ended generation.
 - **Breadth of AI engineering techniques.** As a final project, the stack is deliberately composed of distinct, complementary techniques (RAG, a trained classifier, an agentic graph, guardrails, orchestration) rather than one monolithic LLM call — each component should be independently demonstrable and testable.
 - **Two clearly separated local LLM runtimes.** The project intentionally uses both Llama.cpp and Ollama for different purposes (see below), to keep the RAG generation path and the interactive assistant path architecturally independent.
+- **Operational orchestration and AI reasoning are separate layers.** n8n owns workflow mechanics (webhook, guardrails calls, transcription, routing); LangGraph owns AI decision-making (tool selection, evidence reconciliation, synthesis). Gemini is scoped to structured extraction only, not final analysis. See "Orchestration — n8n Cloud" and "Agent — LangGraph" below for the full rationale.
 
 ---
 
@@ -21,11 +22,13 @@ A few constraints shaped every decision below:
 
 **Trade-off accepted:** More setup and phase time cost (frontend is deliberately deferred to Phase 16+) in exchange for a UI that can properly present a rich, structured analysis result.
 
-## Orchestration — n8n Cloud
+## Orchestration — n8n Cloud (operational workflow only)
 
-**Alternatives considered:** Custom orchestration in a FastAPI backend, LangGraph as the sole orchestrator, Airflow.
+**Alternatives considered:** Custom orchestration in a FastAPI backend, LangGraph as the sole orchestrator (i.e. also handling the webhook, guardrails, and transcription calls itself), Airflow.
 
-**Why chosen:** n8n provides a visual, inspectable workflow (webhook → guardrails → transcription → extraction → services → guardrails → response) that is easy to demo, debug node-by-node, and modify without redeploying code — valuable both for iterative development and for the live demo. It also cleanly separates orchestration/business-flow concerns from the AI reasoning that lives in LangGraph.
+**Scope boundary:** n8n handles operational workflow orchestration only — the webhook, the two-stage guardrails calls, the transcription call, a single call into the LangGraph agent, and response routing. It does not perform AI reasoning and does not call the RAG Service or Call Signal Analyser directly; LangGraph does, as tools. See "Agent — LangGraph" below for why AI decision-making was deliberately pulled out of n8n.
+
+**Why chosen:** n8n provides a visual, inspectable workflow (webhook → guardrails → transcription → guardrails → extraction → LangGraph → guardrails → routing → response) that is easy to demo, debug node-by-node, and modify without redeploying code — valuable both for iterative development and for the live demo. Keeping n8n to deterministic workflow mechanics only, rather than also branching on AI reasoning, keeps the visual graph readable — a workflow with a dozen orchestration nodes is easy to follow; one that also encodes tool-selection and evidence-reconciliation logic would defeat the purpose of a visual tool.
 
 **Trade-off accepted:** n8n Cloud cannot reach `localhost` directly, requiring a tunnel (ngrok / Cloudflare Tunnel) or a local n8n instance during early phases — this is addressed explicitly in Phase 9.
 
@@ -44,13 +47,15 @@ Not yet decided. Will be evaluated at Phase 9 against:
 - n8n Cloud integration complexity
 - reliability for a live demo
 
-## n8n LLM — Gemini
+## n8n LLM — Gemini (structured semantic extraction only)
 
 **Alternatives considered:** OpenAI GPT models, Anthropic Claude, a locally hosted model via Ollama.
 
-**Why chosen:** Gemini offers a generous free/low-cost tier suitable for a student project with repeated iteration during prompt engineering (minimum 5 iterations per surface, per the prompt engineering log requirement), and integrates natively as an n8n node, avoiding custom HTTP request boilerplate for the two LLM-driven nodes (Information Extractor, Final Analysis Generation).
+**Scope boundary:** Gemini's only job in the pipeline is structured semantic extraction — reading the validated transcript and extracting customer intent, main objection, customer sentiment, closing attempt, key sales events, and relevant call metadata. It does not generate coaching feedback, recommendations, or the final analysis; that responsibility belongs entirely to LangGraph (see "Agent — LangGraph" below). There is no separate "final analysis generation" Gemini step — that step was removed, and its responsibility absorbed into LangGraph's synthesizer node.
 
-**Trade-off accepted:** Ties two orchestration-level prompting surfaces to a specific vendor API; mitigated by keeping those prompts isolated in n8n nodes rather than embedded in service code, so the model could be swapped later.
+**Why chosen:** Gemini offers a generous free/low-cost tier suitable for a student project with repeated iteration during prompt engineering (minimum 5 iterations per surface, per the prompt engineering log requirement), and integrates natively as an n8n node, avoiding custom HTTP request boilerplate for the one LLM-driven node in the n8n workflow (the Information Extractor).
+
+**Trade-off accepted:** Ties one orchestration-level prompting surface to a specific vendor API; mitigated by keeping that prompt isolated in an n8n node rather than embedded in service code, so the model could be swapped later. Narrowing Gemini's scope to extraction-only (rather than also doing final synthesis) also means a Gemini outage or rate limit only blocks the extraction step, not the entire reasoning/synthesis pipeline — LangGraph's synthesis step is a separate failure domain.
 
 ## Guardrails — NeMo Guardrails + FastAPI + deterministic custom validation rules
 
@@ -90,21 +95,29 @@ The Guardrails service exposes a single `POST /check/input` endpoint that is inv
 
 **Alternatives considered:** scikit-learn classifier, full librosa-based deep acoustic feature analysis on the raw audio, a transcript-only rules-based scorer with no trained model and no audio input at all.
 
-**Why chosen:** PyTorch was chosen specifically to include a trained classifier as part of the project (a requirement to demonstrate model training, not only prompting/retrieval). The classifier is a feature-based model over an engineered feature vector — not a raw-audio deep learning model; it does not consume waveforms or spectrograms, and audio preprocessing stays lightweight rather than a full acoustic feature-extraction pipeline. The final feature set has three sources:
-- **Transcript-derived and structured-extraction features:** word count, question count, price mention count, competitor mention count, customer intent, main objection, customer sentiment, closing attempt, and speaker-tagged agent talk ratio (only when the transcript is diarized with `Agent:`/`Customer:` tags).
-- **Lightweight audio-derived features:** call duration, silence ratio, speaking rate, speech-to-non-speech ratio, and optionally average energy level — computed directly from the audio file with lightweight signal analysis (e.g. duration and basic energy/silence detection), not full acoustic feature extraction.
+**Scope boundary — no duplicated semantic analysis:** the analyser is called by LangGraph as a tool and must primarily use Gemini's structured extraction for semantic fields (customer intent, main objection, customer sentiment, closing attempt) rather than independently re-deriving them from the transcript. It may use the transcript for deterministic feature calculation (word counts, keyword counts, speaker-tagged ratios), but repeating intent/objection/sentiment extraction as a second, separate analysis would risk the two components silently disagreeing about the same call with no way to reconcile it — that reconciliation is LangGraph's job, not something to duplicate upstream of it.
 
-Including real audio-derived features (rather than treating the analyser as transcript-only) means signals like `silence_ratio` and `call_duration_seconds` reflect what was actually measured in the recording, instead of being approximated from word count alone.
+**Why chosen:** PyTorch was chosen specifically to include a trained classifier as part of the project (a requirement to demonstrate model training, not only prompting/retrieval). The classifier is a feature-based model over an engineered feature vector — not a raw-audio deep learning model; it does not consume waveforms or spectrograms, and audio preprocessing stays lightweight rather than a full acoustic feature-extraction pipeline. The final feature set has three sources:
+- **Transcript-derived and structured-extraction features:** word count, question count, price mention count, competitor mention count, and — sourced from Gemini's extraction, not re-derived — customer intent, main objection, customer sentiment, closing attempt, plus speaker-tagged agent talk ratio (only when the transcript is diarized with `Agent:`/`Customer:` tags).
+- **Lightweight audio-derived features:** call duration, silence ratio, speaking rate, speech-to-non-speech ratio, average pause duration, interruption count, and optionally average pitch/energy level — computed directly from the audio file with lightweight signal analysis (e.g. duration, basic energy/silence detection, and coarse voice-activity segmentation), not full acoustic feature extraction.
+
+Including real audio-derived features (rather than treating the analyser as transcript-only) means signals like `silence_ratio` and `call_duration_seconds` reflect what was actually measured in the recording, instead of being approximated from word count alone. The output also includes a `feature_summary` alongside the scores, so LangGraph (and a human reviewer) can see which feature values actually drove a given prediction.
 
 **Trade-off accepted:** The service now depends on having access to the audio file for some features, not the transcript alone, which is a step up in complexity from a pure text-in service; the exact lightweight audio library and the input contract for supplying the audio file are finalized during implementation (Phase 13). Any feature that cannot be computed for a given call — no diarization tags, or the audio file unavailable — must be explicitly marked missing/unknown in the request/response, never fabricated or silently defaulted. In particular, `silence_ratio` must never be silently set to `0.0` when it was not actually measured; that would misrepresent an unmeasured signal as a real "no silence" reading.
 
-## Agent — LangGraph
+## Agent — LangGraph (the single AI orchestrator and final synthesis layer)
 
-**Alternatives considered:** A single large synthesis prompt in n8n/Gemini, LangChain's older `AgentExecutor`, a custom hand-rolled state machine.
+**Alternatives considered:** A single large synthesis prompt in n8n/Gemini, having n8n call the RAG Service and Call Signal Analyser directly and assemble their outputs itself, LangChain's older `AgentExecutor`, a custom hand-rolled state machine.
 
-**Why chosen:** LangGraph gives an explicit, inspectable graph (Planner → Tool Execution → Synthesizer) with typed state passed between nodes, which produces the `reasoning_steps` and `tools_used` fields required by the output contract almost for free, and makes the reasoning process demoable and debuggable node-by-node — unlike a single opaque LLM call.
+**Scope boundary:** LangGraph decides which tools are required, invokes the RAG Service and Call Signal Analyser as tools, combines the transcript, Gemini's structured extraction, retrieved evidence, and model scores, detects conflicting, missing, or insufficient evidence, generates grounded coaching feedback, recommends the next action, and returns the complete final output JSON. n8n calls it exactly once per request and never calls the RAG Service or Call Signal Analyser itself.
 
-**Trade-off accepted:** More upfront structure than a single prompt; accepted because explicit reasoning steps are a specific requirement of the final output schema and a specific technique the project is meant to demonstrate.
+**Why LangGraph instead of calling services directly from n8n:**
+
+> LangGraph is responsible for AI decision-making rather than operational workflow orchestration. It dynamically decides which tools to invoke, combines evidence from multiple AI services, resolves conflicting or insufficient outputs, and generates the final grounded analysis. n8n remains responsible for deterministic workflow execution, integrations, validation stages and request routing. This separation keeps AI reasoning and business decision logic out of the n8n workflow and allows the reasoning layer to evolve independently.
+
+**Why chosen (technical):** LangGraph gives an explicit, inspectable graph (Planner → Tool Execution → Synthesizer) with typed state passed between nodes, which produces the `reasoning_steps` and `tools_used` fields required by the output contract almost for free, and makes the reasoning process demoable and debuggable node-by-node — unlike a single opaque LLM call. Because LangGraph — not n8n — decides which tools to call and how to reconcile their outputs, adding a new tool or changing how evidence is weighed is a change to the LangGraph service alone; it never requires editing the n8n workflow.
+
+**Trade-off accepted:** More upfront structure than a single prompt, and n8n's single call to LangGraph is a longer-running, more opaque-from-n8n's-perspective request than several short direct calls would be (n8n can no longer show individual RAG/signal-analyser steps in its own execution log — that visibility now lives in LangGraph's `reasoning_steps` and `tools_used` output instead). Accepted because explicit reasoning steps are a specific requirement of the final output schema, and because keeping AI reasoning entirely inside LangGraph is the specific architectural property this decision is meant to guarantee. **Open decision:** which LLM backs the Planner and Synthesizer nodes (Gemini via API, or a separate/local model) is not yet chosen — deferred to Phase 14.
 
 ## Local Assistant — Ollama (separate from Llama.cpp)
 
@@ -154,13 +167,13 @@ The RAG corpus and the classifier training dataset serve different purposes and 
 | Layer | Chosen | Key alternative(s) considered | Primary reason |
 |---|---|---|---|
 | Frontend | React | Streamlit, Vue | Full control over structured results UI |
-| Orchestration | n8n Cloud | Custom FastAPI orchestration, Airflow | Visual, inspectable, demo-friendly workflow |
+| Orchestration | n8n Cloud (operational workflow only) | Custom FastAPI orchestration, Airflow, LangGraph as sole orchestrator | Visual, inspectable, demo-friendly workflow; AI reasoning kept out of it |
 | Transcription | TBD (Phase 9) | — | Decision deferred pending accuracy/diarization/cost evaluation |
-| n8n LLM | Gemini | GPT, Claude | Low-cost iteration, native n8n integration |
+| n8n LLM | Gemini — structured semantic extraction only | GPT, Claude | Low-cost iteration, native n8n integration, narrow single-purpose scope |
 | Guardrails | NeMo Guardrails + FastAPI + deterministic rules | Guardrails AI, prompt-only self-checking | NeMo for semantic/LLM checks, deterministic rules for fixed checks, staged around transcription |
-| RAG | LangChain + ChromaDB + HuggingFace + Llama.cpp | LlamaIndex, Pinecone, OpenAI embeddings | Self-contained, free, grounded generation |
-| Call signal analysis | PyTorch (transcript + structured + lightweight audio features) | scikit-learn, full librosa acoustic pipeline, transcript-only heuristics | Trained feature-based classifier combining real (not fabricated) signals from text and audio |
-| Agent | LangGraph | Single Gemini prompt, LangChain AgentExecutor | Explicit, inspectable reasoning graph |
+| RAG | LangChain + ChromaDB + HuggingFace + Llama.cpp | LlamaIndex, Pinecone, OpenAI embeddings | Self-contained, free, grounded generation; called by LangGraph only |
+| Call signal analysis | PyTorch (transcript + structured + lightweight audio features) | scikit-learn, full librosa acoustic pipeline, transcript-only heuristics | Trained feature-based classifier combining real (not fabricated) signals from text and audio; called by LangGraph only |
+| Agent | LangGraph — single AI orchestrator and final synthesis layer | Single Gemini prompt, LangChain AgentExecutor, n8n calling services directly | Explicit, inspectable reasoning graph; keeps AI decision-making out of n8n |
 | Local assistant | Ollama | Reuse Llama.cpp, call Gemini | Simple conversational runtime, kept independent from RAG generation |
 | Data | CSV + ChromaDB | SQLite/Postgres | Sufficient for dataset size, trivial to version and inspect |
 | Deployment | Docker → AWS EC2 | Managed PaaS, serverless | Persistent processes for loaded models, local/prod parity |

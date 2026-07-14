@@ -75,7 +75,7 @@ See [CLAUDE.md](CLAUDE.md) for the full JSON schema.
 | Frontend | React |
 | Orchestration | n8n Cloud |
 | Transcription | External API (TBD — Phase 9) |
-| LLM (orchestration) | Gemini |
+| Structured extraction LLM | Gemini (extraction only, via n8n) |
 | Guardrails | NeMo Guardrails + FastAPI |
 | RAG | LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp |
 | Call signal analysis | PyTorch (transcript-derived features) |
@@ -89,23 +89,24 @@ Rationale for these choices is documented in `docs/technology_decisions.md` (Pha
 ## System components
 
 - **React web application** — upload form, results page, analytics dashboard, and an Ollama-powered assistant sidebar. Built last (Phase 16+).
-- **n8n Cloud workflow** — orchestrates the full pipeline: guardrails, transcription, Gemini extraction, calls to the AI microservices, and final assembly.
-- **Sales Call RAG Service** (`services/rag_service`) — retrieves similar historical calls from ChromaDB with cited, grounded insights.
-- **Voice / Call Signal Analyser** (`services/call_signal_analyser`) — PyTorch classifier producing outcome prediction, lead quality, agent performance, and risk scoring from transcript-derived features.
-- **Guardrails Service** (`services/guardrails_service`) — NeMo Guardrails input/output validation (off-topic content, prompt injection, invented facts, missing citations, etc.).
-- **LangGraph Sales Agent** (`services/langgraph_agent`) — Planner → Tool Execution → Synthesizer graph that reasons over the RAG and signal-analysis results to produce coaching feedback and next actions.
+- **n8n Cloud workflow** — operational orchestration only: guardrails (both stages), transcription, Gemini extraction, and a single call into the LangGraph agent. Does not call the RAG Service or Call Signal Analyser directly.
+- **LangGraph Sales Agent** (`services/langgraph_agent`) — the system's single AI orchestrator and final synthesis layer. Planner → Tool Execution → Synthesizer graph that invokes the RAG Service and Call Signal Analyser as tools, reconciles their evidence, and produces the complete analysis result (coaching feedback, next actions, follow-up email, and more).
+- **Sales Call RAG Service** (`services/rag_service`) — retrieves similar historical calls from ChromaDB with cited, grounded insights. Called by LangGraph only.
+- **Voice / Call Signal Analyser** (`services/call_signal_analyser`) — PyTorch classifier producing outcome prediction, lead quality, agent performance, and risk scoring from transcript, structured-extraction, and lightweight audio-derived features. Called by LangGraph only.
+- **Guardrails Service** (`services/guardrails_service`) — NeMo Guardrails + deterministic input/output validation (off-topic content, prompt injection, invented facts, missing citations, etc.).
 
 Full endpoint contracts, request/response schemas, and the architecture diagram are in [CLAUDE.md](CLAUDE.md).
 
 ## Architecture overview
 
 ```
-User uploads audio → React → n8n Cloud → Input Guardrails → Transcription
-  → Gemini extraction → RAG Service + Call Signal Analyser + LangGraph Agent
-  → Output Guardrails → Results shown in React
+User uploads audio → React → n8n Cloud → Pre-Transcription File Validation → Transcription
+  → Post-Transcription Input Guardrails → Gemini structured extraction (n8n)
+  → LangGraph agent (invokes RAG Service + Call Signal Analyser as tools, synthesizes result)
+  → Output Guardrails → Confidence & Human-Review Routing → Results shown in React
 ```
 
-A confidence threshold of 0.65 gates the pipeline: results below that are routed to `human_review_required` instead of being returned automatically. See `docs/architecture.md` (Phase 4) for the full Mermaid diagram and component-level detail.
+n8n makes exactly one call into AI reasoning — to the LangGraph agent; LangGraph is the only component that calls the RAG Service and Call Signal Analyser. A confidence threshold of 0.65 (plus evidence-conflict and guardrail checks) gates the pipeline: results that don't clear it are routed to `human_review_required` instead of being returned automatically. See [docs/architecture.md](docs/architecture.md) for the full Mermaid diagram and component-level detail.
 
 ## Repository structure
 

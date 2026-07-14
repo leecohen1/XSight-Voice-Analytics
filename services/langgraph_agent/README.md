@@ -6,6 +6,8 @@ LangGraph Sales Agent.
 
 **Stack:** FastAPI, LangGraph.
 
-**Endpoint:** `POST /agent/run` — runs a Planner → Tool Execution → Synthesizer graph over the call transcript, metadata, and prior analysis, using the RAG tool, Call Signal Analyser tool, and Follow-up recommendation tool, to produce a synthesized answer, reasoning steps, coaching feedback, and a recommended next action.
+**Role:** the system's single AI orchestrator and final synthesis layer — called once per request by n8n. Not just a reasoning helper: this service decides which tools are needed, invokes the RAG Service and Call Signal Analyser itself (n8n never calls them directly), reconciles their evidence, and returns the complete final output JSON.
 
-See [CLAUDE.md](../../CLAUDE.md) for the full input/output contract.
+**Endpoint:** `POST /agent/run` — runs a Planner → Tool Execution → Synthesizer graph over the call transcript, metadata, and Gemini's structured extraction, using the RAG tool, Call Signal Analyser tool, and Follow-up recommendation tool, to detect conflicting/missing evidence and produce the complete analysis result: coaching feedback, recommended next action, follow-up email, and the rest of the final output schema, plus `reasoning_steps` and `tools_used` for transparency.
+
+See [CLAUDE.md](../../CLAUDE.md#6-langgraph-sales-agent) for the full input/output contract.

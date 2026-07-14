@@ -112,16 +112,27 @@ The final output is a full sales call analysis result displayed in a React websi
 ## Final chosen technology stack
 
 1. **Frontend:** React Web Application (built near end of project — not at the beginning)
-2. **Orchestration:** n8n Cloud
+2. **Orchestration:** n8n Cloud — operational workflow orchestration only (webhook handling, guardrails calls, transcription call, a single call to the LangGraph agent, response routing). n8n does not perform AI reasoning and does not call the RAG Service or Call Signal Analyser directly — LangGraph does, as tools.
 3. **Transcription:** External API — TBD at Phase 9. Ask before implementing.
-4. **n8n LLM:** Gemini
+4. **Gemini (via n8n):** structured semantic extraction only — reads the validated transcript and extracts customer intent, main objection, customer sentiment, closing attempt, key sales events, and relevant call metadata. Does not generate coaching feedback, recommendations, or the final analysis.
 5. **Guardrails:** NeMo Guardrails + FastAPI + deterministic custom validation rules. NeMo Guardrails handles topic restrictions, unsafe content, prompt injection, jailbreak attempts, and other LLM-oriented input/output policies. Deterministic rules handle checks such as empty input, transcript length, missing citations, invalid schemas, unsupported file formats, and required fields. Input validation runs in two stages — pre-transcription file validation and post-transcription content guardrails — see Architecture flow.
-6. **RAG:** LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp. Embedding model: `sentence-transformers/all-MiniLM-L6-v2`
-7. **Voice / Call Signal Analysis:** PyTorch feature-based classifier over an engineered feature vector — not a raw-audio deep learning model. Combines transcript-derived / structured-extraction features (word count, question count, price/competitor mention counts, customer intent, main objection, customer sentiment, closing attempt, speaker-tagged agent_talk_ratio when diarization is available) with lightweight audio-derived features (call duration, silence ratio, speaking rate, speech-to-non-speech ratio, optional average energy level). Audio preprocessing is lightweight, not full acoustic/deep-learning feature extraction. Features that are unavailable must be marked missing/unknown rather than fabricated — e.g. `silence_ratio` must never be silently defaulted to 0.0.
-8. **Agent:** LangGraph — planner → tool execution → synthesizer graph. Exposed via FastAPI.
+6. **RAG:** LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp. Embedding model: `sentence-transformers/all-MiniLM-L6-v2`. Retrieval of grounded historical-call evidence only — invoked by LangGraph as a tool, not called directly by n8n.
+7. **Voice / Call Signal Analysis:** PyTorch feature-based classifier over an engineered feature vector — not a raw-audio deep learning model. Prediction, scoring, and confidence estimation only — invoked by LangGraph as a tool, not called directly by n8n. Combines transcript-derived / structured-extraction features (word count, question count, price/competitor mention counts, customer intent, main objection, customer sentiment, closing attempt, speaker-tagged agent_talk_ratio when diarization is available — sourced from Gemini's extraction, not independently re-derived) with lightweight audio-derived features (call duration, silence ratio, speaking rate, speech-to-non-speech ratio, pause duration, interruptions, optional average pitch/energy level). Audio preprocessing is lightweight, not full acoustic/deep-learning feature extraction. Features that are unavailable must be marked missing/unknown rather than fabricated — e.g. `silence_ratio` must never be silently defaulted to 0.0.
+8. **Agent:** LangGraph — the system's single AI orchestrator and final synthesis layer: planner → tool execution → synthesizer graph. Decides which tools are needed, invokes the RAG Service and Call Signal Analyser as tools, reconciles their evidence, detects conflicting/missing/insufficient evidence, generates grounded coaching feedback, and returns the complete final output JSON. Exposed via FastAPI. LLM backend for the Planner/Synthesizer nodes: TBD — Phase 14.
 9. **Local Assistant:** Ollama — runs separately from Llama.cpp. Ollama serves the React sidebar assistant only. Llama.cpp runs inside the RAG service only. These are two separate runtimes and must not be merged.
 10. **Data:** CSV + ChromaDB
 11. **Deployment:** Docker locally first, then AWS EC2
+
+---
+
+## Component responsibility boundaries
+
+- **n8n:** operational workflow orchestration only — webhook handling, guardrails calls, the transcription call, a single call to the LangGraph agent, and response routing. No AI reasoning, no direct calls to the RAG Service or Call Signal Analyser.
+- **Gemini (via n8n):** structured semantic extraction only — customer intent, main objection, customer sentiment, closing attempt, key sales events, and relevant call metadata from the validated transcript. Never generates coaching feedback, recommendations, or the final analysis.
+- **LangGraph:** AI orchestration, tool execution, evidence reconciliation, reasoning, and final response generation. Decides which tools are required, invokes the RAG Service and Call Signal Analyser as tools, combines the transcript, Gemini's structured extraction, retrieved evidence, and model scores, detects conflicting/missing/insufficient evidence, and returns the complete final output JSON.
+- **RAG Service:** retrieval of grounded historical-call evidence only.
+- **Call Signal Analyser:** prediction, scoring, and confidence estimation only — uses Gemini's structured extraction rather than re-deriving intent/objection/sentiment itself.
+- **Guardrails Service:** input validation (both stages) and final-output validation only.
 
 ---
 
@@ -140,15 +151,17 @@ User uploads sales call audio
 → Pre-Transcription File Validation (deterministic checks)
 → Transcription API (TBD Phase 9)
 → Post-Transcription Input Content Guardrails (NeMo + deterministic rules)
-→ Sales Call Understanding / Information Extraction (Gemini via n8n)
-→ FastAPI AI Microservices on AWS EC2:
-  → Sales Call RAG Service
-  → Voice / Call Signal Analyser
-  → LangGraph Sales Agent
-→ Sales Call Analysis Results
+→ Gemini Structured Semantic Extraction (via n8n)
+→ LangGraph AI Orchestrator (FastAPI on AWS EC2):
+  → invokes Sales Call RAG Service (tool)
+  → invokes Voice / Call Signal Analyser (tool)
+  → reconciles evidence, reasons, synthesizes the complete final output
 → Output Guardrails Service (NeMo + deterministic rules)
+→ Confidence and Human-Review Routing
 → Results displayed in React website
 ```
+
+n8n makes exactly one call into the AI reasoning layer — to the LangGraph agent. LangGraph is the only component that calls the RAG Service and Call Signal Analyser; n8n never calls them directly.
 
 **Note on staged input validation:** file-level checks (does the file exist, is it a supported audio format, is it within size/duration limits, are required metadata fields present) must run *before* transcription, since the transcript does not exist yet at that point. Content-level checks (empty/too-short transcript, off-topic content, offensive content, prompt injection) can only run *after* transcription, since they require the transcript text. See Guardrails Service (component 5) for the full breakdown of both stages.
 
@@ -168,23 +181,21 @@ flowchart LR
 
     E --> D2["Post-Transcription\nInput Content Guardrails\nNeMo Guardrails + deterministic rules"]
 
-    D2 --> F["Sales Call Understanding\nExtract intent, objection,\nsentiment and call metadata\nGemini via n8n"]
+    D2 --> F["Gemini Structured Extraction\nCustomer intent, objection, sentiment,\nclosing attempt, key sales events\nvia n8n — extraction only"]
 
-    F --> G["AI Services\nFastAPI Microservices on AWS EC2"]
+    F --> J["LangGraph AI Orchestrator\nPlanner -> Tool Execution -> Synthesizer\nFastAPI on AWS EC2"]
 
-    G --> H["Sales Call RAG Service\nLangChain + ChromaDB + Llama.cpp"]
+    J -->|tool call| H["Sales Call RAG Service\nLangChain + ChromaDB + Llama.cpp"]
+    H -->|grounded evidence + citations| J
 
-    G --> I["Voice / Call Signal Analyser\nPyTorch — transcript + lightweight audio features"]
+    J -->|tool call| I["Voice / Call Signal Analyser\nPyTorch — transcript + lightweight audio features"]
+    I -->|scores + confidence| J
 
-    G --> J["LangGraph Sales Agent\nReasoning and recommendations"]
+    J --> L["Output Guardrails Service\nNeMo Guardrails + deterministic rules"]
 
-    H --> K["XSight Analysis Results"]
-    I --> K
-    J --> K
+    L --> R["Confidence & Human-Review Routing\nconfidence < 0.65, conflicting evidence,\nmissing citations, severe guardrail flags"]
 
-    K --> L["Output Guardrails Service\nNeMo Guardrails + deterministic rules"]
-
-    L --> M["Results Displayed in Website\nTranscript, insights, scores,\nsimilar calls, coaching feedback,\nfollow-up recommendation and routing"]
+    R --> M["Results Displayed in Website\nTranscript, insights, scores,\nsimilar calls, coaching feedback,\nfollow-up recommendation and routing"]
 
     M --> B
 
@@ -237,23 +248,27 @@ Orchestration layer. Receives the submission, calls services, manages the AI wor
 4. Transcription API HTTP Request (TBD Phase 9)
 5. Post-Transcription Input Content Guardrails HTTP Request (NeMo + deterministic rules)
 6. IF pass/fail (content guardrails)
-7. Information Extractor — Gemini (prompt engineering surface)
-8. HTTP Request to RAG Service
-9. HTTP Request to Call Signal Analyser
-10. HTTP Request to LangGraph Agent
-11. Final Analysis Generation — Gemini (prompt engineering surface)
-12. Output Guardrails HTTP Request (NeMo + deterministic rules)
-13. IF safe / human review
-14. Respond to Webhook
+7. Information Extractor — Gemini structured semantic extraction only (prompt engineering surface)
+8. HTTP Request to LangGraph Agent (single call — LangGraph internally invokes the RAG Service and Call Signal Analyser as tools, reconciles their evidence, and returns the complete final output)
+9. Output Guardrails HTTP Request (NeMo + deterministic rules)
+10. IF safe / human review
+11. Respond to Webhook
 
-Steps 2–3 (pre-transcription file validation) and 5–6 (post-transcription content guardrails) both call the Guardrails Service's `POST /check/input` endpoint, passing only the data available at that stage — see Guardrails Service (component 5) for the exact data available at each stage.
+Steps 2–3 (pre-transcription file validation) and 5–6 (post-transcription content guardrails) both call the Guardrails Service's `POST /check/input` endpoint, passing only the data available at that stage — see Guardrails Service (component 5) for the exact data available at each stage. n8n does not call the RAG Service or Call Signal Analyser directly — node 8 is the only AI-reasoning call n8n makes, and LangGraph owns everything downstream of it until the result comes back.
 
-**Confidence routing rule:** If the Call Signal Analyser returns confidence < 0.65, the n8n IF node (node 13) must route to `human_review_required` instead of returning the result directly.
+**Human review routing rule:** The n8n IF node (node 10) must route to `human_review_required` instead of returning the result directly whenever any of the following holds:
+- the Call Signal Analyser's confidence < 0.65
+- LangGraph detects conflicting evidence between the RAG Service and the Call Signal Analyser
+- required supporting evidence or historical-call citations are missing
+- the output guardrails report a severe issue
+- a required tool fails and LangGraph cannot produce a sufficiently grounded result
 
 ### 3. Sales Call RAG Service
 
 Location: `services/rag_service`
 Stack: FastAPI, LangChain, ChromaDB, HuggingFace embeddings, Llama.cpp
+
+Called by: the LangGraph agent only, as a tool. Not called directly by n8n.
 
 Endpoint: `POST /query`
 
@@ -297,19 +312,21 @@ Output:
 Location: `services/call_signal_analyser`
 Stack: FastAPI, PyTorch, pandas, lightweight audio preprocessing (exact library finalized at Phase 13 — not librosa-scale acoustic feature extraction)
 
+Called by: the LangGraph agent only, as a tool. Not called directly by n8n.
+
 Endpoint: `POST /analyse-call`
 
-The classifier is a feature-based model over an engineered feature vector — not a raw-audio deep learning model (no waveform/spectrogram input, no acoustic deep learning). Features come from three sources: transcript-derived features, structured fields already extracted upstream by Gemini, and lightweight audio-derived features computed from the original audio file. A feature that cannot be computed for a given call (e.g. no diarization tags in the transcript, or the audio file is unavailable) must be marked missing/unknown in the request/response, never fabricated or silently defaulted.
+The classifier is a feature-based model over an engineered feature vector — not a raw-audio deep learning model (no waveform/spectrogram input, no acoustic deep learning). Features come from three sources: transcript-derived features, structured fields already extracted upstream by Gemini, and lightweight audio-derived features computed from the original audio file. The service must primarily use Gemini's structured extraction for semantic fields (customer intent, main objection, customer sentiment, closing attempt) — it may use the transcript for deterministic feature calculation (word counts, keyword counts, speaker-tagged ratios), but it must not independently repeat intent, objection, or sentiment extraction as a separate analysis. A feature that cannot be computed for a given call (e.g. no diarization tags in the transcript, or the audio file is unavailable) must be marked missing/unknown in the request/response, never fabricated or silently defaulted.
 
 **Transcript-derived and structured-extraction features:**
 - `word_count`
 - `question_count`
 - `price_mentions_count`: keyword count
 - `competitor_mentions_count`: keyword count
-- `customer_intent`: encoded from extracted field
-- `main_objection`: encoded from extracted field
-- `customer_sentiment`: encoded from extracted field
-- `closing_attempt`: encoded from extracted field
+- `customer_intent`: from Gemini's structured extraction
+- `main_objection`: from Gemini's structured extraction
+- `customer_sentiment`: from Gemini's structured extraction
+- `closing_attempt`: from Gemini's structured extraction
 - `agent_talk_ratio`: agent word count / total word count — only computable when the transcript is speaker-tagged (Agent:/Customer:); marked missing/unknown otherwise
 
 **Lightweight audio-derived features:**
@@ -317,6 +334,9 @@ The classifier is a feature-based model over an engineered feature vector — no
 - `silence_ratio`: measured via lightweight silence/energy detection on the audio file; marked missing/unknown if the audio file is unavailable — must never be silently defaulted to 0.0
 - `speaking_rate_wpm`: word count / actual audio duration
 - `speech_to_non_speech_ratio`
+- `average_pause_duration_seconds`: mean length of detected pauses (optional — marked missing/unknown if not computable)
+- `interruptions_count`: detected speaker overlaps, when timestamps/diarization allow it (optional — marked missing/unknown otherwise)
+- `average_pitch_hz` (optional)
 - `average_energy_level` (optional)
 
 Output:
@@ -331,11 +351,18 @@ Output:
     "price objection",
     "high customer interest",
     "weak closing attempt"
-  ]
+  ],
+  "feature_summary": {
+    "call_duration_seconds": 420,
+    "agent_talk_ratio": 0.62,
+    "speaking_rate_wpm": 145,
+    "silence_ratio": 0.08,
+    "price_mentions_count": 3
+  }
 }
 ```
 
-If confidence < 0.65: return "Uncertain" and flag for human review.
+`feature_summary` reports the key feature values the prediction was based on, so LangGraph (and a human reviewer) can see what drove the score, not just the score itself. If confidence < 0.65: return "Uncertain" and flag for human review.
 
 ### 5. Guardrails Service
 
@@ -366,6 +393,8 @@ The Guardrails service exposes a single `POST /check/input` endpoint that is inv
 - prompt injection or instruction-override attempts
 - supported language validation, if enabled
 
+`POST /check/output` validates the complete final output JSON assembled by the LangGraph agent (see component 6), before it is returned to the user.
+
 **Output guardrails detect:**
 - invented CRM facts
 - unsupported business conclusions
@@ -389,36 +418,72 @@ Response format:
 Location: `services/langgraph_agent`
 Stack: FastAPI, LangGraph
 
+Called by: n8n (exactly one call per analysis request — this is the system's single AI orchestrator and final synthesis layer).
+
 Endpoint: `POST /agent/run`
+
+LangGraph decides which tools are required, invokes the RAG Service and Call Signal Analyser as tools through their FastAPI endpoints, combines the transcript, Gemini's structured extraction, retrieved evidence, and model scores, detects conflicting, missing, or insufficient evidence, generates grounded coaching feedback, recommends the next action, and returns the complete final output JSON. It may inspect the transcript for evidence verification and contextual reasoning, but it must not repeat Gemini's structured extraction as a separate analysis stage — it consumes Gemini's extraction as input.
 
 Graph: Planner Node → Tool Execution Node → Synthesizer Node
 
-Tools: RAG tool, Call Signal Analyser tool, Follow-up recommendation tool
+Tools: RAG tool (`services/rag_service`), Call Signal Analyser tool (`services/call_signal_analyser`), Follow-up recommendation tool
+
+**LLM backend:** TBD — Phase 14. The Planner and Synthesizer nodes require an LLM call for reasoning and text generation (e.g. Gemini via API, or a separate/local model); the specific choice is deferred to implementation.
 
 Input:
 ```json
 {
-  "question": "Why did this call fail and what should the agent improve?",
   "transcript": "...",
   "metadata": {},
-  "analysis": {}
+  "extracted_fields": {
+    "customer_intent": "...",
+    "main_objection": "...",
+    "customer_sentiment": "...",
+    "closing_attempt": "...",
+    "key_sales_events": ["..."]
+  }
 }
 ```
 
-Output:
+Output — the complete final output JSON schema (see top of this document), plus reasoning-transparency fields. `guardrail_status` is added afterward by the output guardrails / human-review routing step, not by LangGraph itself:
 ```json
 {
-  "answer": "...",
+  "call_summary": "...",
+  "customer_intent": "...",
+  "main_objection": "...",
+  "customer_sentiment": "positive | neutral | negative",
+  "call_outcome": "Sale | No Sale | Follow-up Needed | Uncertain",
+  "agent_performance_score": 3,
+  "lead_quality_score": 4,
+  "similar_calls": [
+    {
+      "call_id": "CALL_003",
+      "agent_name": "Daniel Cohen",
+      "sale_result": "Sale",
+      "main_objection": "price",
+      "similarity_score": 0.89,
+      "reason": "Similar price objection with high customer intent."
+    }
+  ],
+  "coaching_feedback": ["..."],
+  "recommended_next_action": "...",
+  "suggested_follow_up_email": "...",
+  "routing_category": "...",
+  "confidence": 0.86,
+  "risk_level": "Medium",
+  "detected_signals": ["..."],
+  "limitations": "...",
   "tools_used": ["rag_service", "call_signal_analyser"],
   "reasoning_steps": [
     "Detected main objection",
     "Compared with similar failed calls",
     "Generated coaching recommendation"
   ],
-  "recommended_next_action": "...",
-  "coaching_feedback": []
+  "evidence_conflicts": []
 }
 ```
+
+`evidence_conflicts` is non-empty when the RAG Service and Call Signal Analyser disagree (e.g. RAG evidence suggests a strong outcome but the signal analyser scores it as high-risk) or when supporting evidence/citations are insufficient — n8n's human-review routing (component 2) checks this field.
 
 ### 7. Data Design
 
@@ -452,8 +517,8 @@ Location: `docs/prompt_engineering_log.md`
 Minimum 5 iterations per surface.
 
 **Surfaces:**
-1. n8n Information Extractor prompt
-2. n8n Final Analysis prompt
+1. n8n Information Extractor prompt (Gemini structured semantic extraction)
+2. LangGraph synthesizer prompt (final response generation — coaching feedback, recommendations, complete output JSON)
 3. LangChain RAG prompt (citation and grounding instructions)
 4. NeMo Guardrails rail prompts (input + output)
 5. Ollama Assistant system prompt
