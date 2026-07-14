@@ -9,7 +9,7 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 | 1 | Repository structure | Complete |
 | 2 | README and project documentation | Complete |
 | 3 | Technology decisions document | Complete |
-| 4 | Architecture document with Mermaid diagram | Not started |
+| 4 | Architecture document with Mermaid diagram | In progress |
 | 5 | Adapted CSV dataset | Not started |
 | 6 | FastAPI mock service skeletons | Not started |
 | 7 | Docker Compose for local backend services | Not started |
@@ -63,3 +63,9 @@ Confirmed by user. Committed as "Phase 3: Technology decisions document".
 - Preserved unchanged: React, n8n Cloud, Gemini, LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp for RAG, `sentence-transformers/all-MiniLM-L6-v2`, LangGraph, Ollama, CSV + ChromaDB, Docker → AWS EC2.
 
 Phase 4 has not been started.
+
+### Phase 4 — Architecture document with Mermaid diagram (in progress)
+
+Created `docs/architecture.md`: embeds the corrected flowchart from `CLAUDE.md`, then adds detail that doesn't belong in the spec file — design principles behind the flow, a step-by-step request lifecycle (§3.1–3.10) walking through both guardrails stages, the AI services call, and the confidence-based human-review routing decision; a component responsibility matrix (location, endpoints, callers, dependencies); a data-flow section (CSV → ChromaDB / PyTorch, Llama.cpp vs. Ollama isolation); a deployment topology section (local Docker Compose vs. EC2, n8n tunnel note); an error/rejection-paths table; and a list of open items still pending later phases (transcription provider, n8n connectivity approach, audio library). Updated the README documentation index to link directly to the file.
+
+Awaiting user confirmation to mark Phase 4 complete.
