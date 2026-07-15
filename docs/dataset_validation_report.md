@@ -7,6 +7,8 @@
 
 This report is generated entirely by `scripts/validate_historical_dataset.py` — every number below is computed directly from the CSV at validation time, not carried over from prior manual review. Re-run the script any time the CSV changes to regenerate this report.
 
+> **Normalization note (Phase 5C refinement):** an earlier validation pass found `speaking_rate_wpm` (all 24 rows, by 3–6 wpm) and `price_mentions_count` (5 rows: CALL_003, 014, 017, 018, 023) computed with the original Phase 5B.1 hand-counting method instead of this script's canonical algorithms (`compute_word_counts` / `PRICE_KEYWORDS` in `validate_historical_dataset.py`). `scripts/normalize_dataset_fields.py` was run once to overwrite those two fields in `data/historical_sales_calls.csv` with the canonical recomputed values — 29 field values changed across 24 rows. No other column (transcript, metadata, Ground Truth fields, outcomes, intent, objections, sentiment, scores, `manager_notes`, `competitor_mentions_count`, `call_duration_seconds`, `silence_ratio`, `speech_to_non_speech_ratio`, `agent_talk_ratio`) was touched. This validation run confirms the result: those 25 warnings no longer appear below.
+
 ---
 
 ## 1. Schema
@@ -123,7 +125,6 @@ All enum-typed columns checked against the taxonomies in `dataset_design.md` §4
 
 `speaking_rate_wpm` was recomputed as `total transcript word count ÷ (call_duration_seconds/60)`, and `agent_talk_ratio` as `agent word count ÷ total word count`, both directly from the `transcript` column — then compared to the stored values. `silence_ratio + speech_to_non_speech_ratio` was checked for closeness to 1.0 (their definitions are complementary per dataset_design.md §11). Differences are reported as warnings, not auto-corrected — see the Warnings section below for any that exceeded tolerance (wpm ±3, ratio ±0.02, complement ±0.03).
 
-**Root cause identified for the 20 `speaking_rate_wpm` warnings below:** they are systematic, not 20 independent problems. During Phase 5B.1 authoring, word counts were computed by hand with `grep '^Agent:' file | wc -w` (and the `Customer:` equivalent), which counts the literal `Agent:`/`Customer:` speaker-tag token itself as one word per turn — inflating the stored word count (and therefore the stored `speaking_rate_wpm`) by roughly one word per turn. This script's recomputation strips the speaker-tag token before counting, giving a slightly lower, more accurate word count. The transcript *content* is unaffected either way — this is purely a difference in how the word count used to derive `speaking_rate_wpm` was calculated. Per the fix policy, this was not auto-corrected: recalculating and rewriting 20 stored numeric values based on a redefined counting convention is a data change, not an indisputable formatting fix, so it is reported here for the user to decide whether to accept the small (3–6 wpm) historical figures as-is or regenerate them.
 
 
 ---
@@ -135,17 +136,7 @@ All enum-typed columns checked against the taxonomies in `dataset_design.md` §4
 - **Price keywords:** `\bprice\b, \bpricing\b, \bpriced\b, \bcost\b, \bcosts\b, \bbudget\b, \bbudgets\b, \bfee\b, \bfees\b, \bdiscount\b, \$\d`
 - **Competitor keywords:** `\bcompetitor\b, \bcompetitors\b, \bRealSync\b, \bPipeFlow\b`
 
-**5 mismatch(es) found between stored and recomputed values:**
-
-| Call | Field | Stored | Recomputed |
-|---|---|---|---|
-| CALL_003 | `price_mentions_count` | 3 | 2 |
-| CALL_014 | `price_mentions_count` | 4 | 6 |
-| CALL_017 | `price_mentions_count` | 2 | 1 |
-| CALL_018 | `price_mentions_count` | 6 | 8 |
-| CALL_023 | `price_mentions_count` | 2 | 1 |
-
-**Not auto-corrected.** Per the fix policy, only indisputable arithmetic/formatting bugs are auto-fixed; a keyword-list methodology difference (e.g. the original hand-count using looser substring matching vs. this script's stricter word-boundary matching) is not indisputable, so these are reported for human review rather than silently overwritten.
+No mismatches found — all stored mention counts match this script's independent recomputation exactly.
 
 ---
 
@@ -169,31 +160,6 @@ None.
 
 ## Warnings
 
-- ⚠️ CALL_001: speaking_rate_wpm stated=125.0, recomputed from transcript=121.1 (diff 3.9)
-- ⚠️ CALL_003: speaking_rate_wpm stated=123.0, recomputed from transcript=119.2 (diff 3.8)
-- ⚠️ CALL_004: speaking_rate_wpm stated=119.0, recomputed from transcript=113.4 (diff 5.6)
-- ⚠️ CALL_005: speaking_rate_wpm stated=118.0, recomputed from transcript=114.4 (diff 3.6)
-- ⚠️ CALL_006: speaking_rate_wpm stated=107.0, recomputed from transcript=102.7 (diff 4.3)
-- ⚠️ CALL_007: speaking_rate_wpm stated=131.0, recomputed from transcript=126.9 (diff 4.1)
-- ⚠️ CALL_008: speaking_rate_wpm stated=115.0, recomputed from transcript=111.5 (diff 3.5)
-- ⚠️ CALL_009: speaking_rate_wpm stated=125.0, recomputed from transcript=121.3 (diff 3.7)
-- ⚠️ CALL_010: speaking_rate_wpm stated=110.0, recomputed from transcript=106.4 (diff 3.6)
-- ⚠️ CALL_011: speaking_rate_wpm stated=115.0, recomputed from transcript=110.3 (diff 4.7)
-- ⚠️ CALL_012: speaking_rate_wpm stated=110.0, recomputed from transcript=104.9 (diff 5.1)
-- ⚠️ CALL_013: speaking_rate_wpm stated=119.0, recomputed from transcript=115.3 (diff 3.7)
-- ⚠️ CALL_016: speaking_rate_wpm stated=126.0, recomputed from transcript=120.6 (diff 5.4)
-- ⚠️ CALL_017: speaking_rate_wpm stated=115.0, recomputed from transcript=111.6 (diff 3.4)
-- ⚠️ CALL_018: speaking_rate_wpm stated=131.0, recomputed from transcript=126.9 (diff 4.1)
-- ⚠️ CALL_019: speaking_rate_wpm stated=136.0, recomputed from transcript=130.7 (diff 5.3)
-- ⚠️ CALL_020: speaking_rate_wpm stated=116.0, recomputed from transcript=111.2 (diff 4.8)
-- ⚠️ CALL_021: speaking_rate_wpm stated=110.0, recomputed from transcript=105.5 (diff 4.5)
-- ⚠️ CALL_022: speaking_rate_wpm stated=116.0, recomputed from transcript=112.3 (diff 3.7)
-- ⚠️ CALL_023: speaking_rate_wpm stated=126.0, recomputed from transcript=120.0 (diff 6.0)
-- ⚠️ CALL_003: price_mentions_count stored=3, recomputed with documented keyword list=2 (not auto-corrected — methodology difference, not an indisputable bug)
-- ⚠️ CALL_014: price_mentions_count stored=4, recomputed with documented keyword list=6 (not auto-corrected — methodology difference, not an indisputable bug)
-- ⚠️ CALL_017: price_mentions_count stored=2, recomputed with documented keyword list=1 (not auto-corrected — methodology difference, not an indisputable bug)
-- ⚠️ CALL_018: price_mentions_count stored=6, recomputed with documented keyword list=8 (not auto-corrected — methodology difference, not an indisputable bug)
-- ⚠️ CALL_023: price_mentions_count stored=2, recomputed with documented keyword list=1 (not auto-corrected — methodology difference, not an indisputable bug)
 - ⚠️ Batch 1 calls (['CALL_001', 'CALL_002', 'CALL_003', 'CALL_004']) contain banned template phrases — documented, pre-existing exception per CLAUDE.md's Transcript Writing Guidelines (guidelines apply 'starting from Batch 2 onward'; Batch 1 explicitly not rewritten retroactively).
 - ⚠️ Repeated opening pattern: 20/24 calls open the agent's first line with literal 'thanks for' — not a banned template, but a corpus-wide structural repetition worth noting.
 - ⚠️ Verbal tic 'honestly' appears 47 times across 21/24 calls — the most repeated filler word in the corpus.
@@ -208,4 +174,4 @@ None — no objective formatting errors (stray whitespace, boolean casing) were 
 
 **Status: READY WITH WARNINGS**
 
-Zero schema, Ground Truth, corpus-math, or hard-consistency errors were found (0 errors). 28 warning(s) were surfaced — style/consistency signals (documented Batch 1 exception, mention-count methodology differences, corpus-wide opener/filler-word patterns, or minor audio-consistency drift) that do not violate any explicit rule in `dataset_design.md` or `CLAUDE.md`. The dataset is ready to freeze; the warnings are recommended reading for anyone doing further RAG-quality tuning, not blockers.
+Zero schema, Ground Truth, corpus-math, or hard-consistency errors were found (0 errors). 3 warning(s) were surfaced — style/consistency signals (documented Batch 1 exception, mention-count methodology differences, corpus-wide opener/filler-word patterns, or minor audio-consistency drift) that do not violate any explicit rule in `dataset_design.md` or `CLAUDE.md`. The dataset is ready to freeze; the warnings are recommended reading for anyone doing further RAG-quality tuning, not blockers.

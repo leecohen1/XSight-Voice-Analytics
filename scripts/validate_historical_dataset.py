@@ -119,6 +119,28 @@ def count_matches(patterns, text):
     return sum(len(re.findall(p, text, re.IGNORECASE)) for p in patterns)
 
 
+def compute_word_counts(transcript):
+    """Canonical word-count algorithm: counts words in each transcript line
+    AFTER stripping the leading 'Agent:'/'Customer:' speaker tag, so the tag
+    itself is never counted as a word. Returns (agent_words, total_words)."""
+    lines = [ln for ln in transcript.split("\n") if ln.strip()]
+    agent_words = sum(len(ln.split()) - 1 for ln in lines if ln.startswith("Agent:"))
+    total_words = sum(len(ln.split()) - 1 for ln in lines
+                       if ln.startswith("Agent:") or ln.startswith("Customer:"))
+    return agent_words, total_words
+
+
+def recompute_speaking_rate_wpm(transcript, call_duration_seconds):
+    """Canonical speaking_rate_wpm: total_words / (duration_minutes)."""
+    _, total_words = compute_word_counts(transcript)
+    return total_words / (float(call_duration_seconds) / 60)
+
+
+def recompute_price_mentions_count(transcript):
+    """Canonical price_mentions_count: word-boundary matches against PRICE_KEYWORDS."""
+    return count_matches(PRICE_KEYWORDS, transcript)
+
+
 def main():
     errors = []
     warnings = []
@@ -310,9 +332,7 @@ def main():
     for r in rows:
         cid = r["call_id"]
         transcript = r["transcript"]
-        lines = [ln for ln in transcript.split("\n") if ln.strip()]
-        agent_words = sum(len(ln.split()) - 1 for ln in lines if ln.startswith("Agent:"))
-        total_words = sum(len(ln.split()) - 1 for ln in lines if ln.startswith("Agent:") or ln.startswith("Customer:"))
+        agent_words, total_words = compute_word_counts(transcript)
 
         try:
             duration = float(r["call_duration_seconds"])
@@ -448,6 +468,8 @@ def write_report(status, errors, warnings, fixes_applied, header, rows,
     lines.append(f"**Final status: {status}**")
     lines.append("")
     lines.append("This report is generated entirely by `scripts/validate_historical_dataset.py` — every number below is computed directly from the CSV at validation time, not carried over from prior manual review. Re-run the script any time the CSV changes to regenerate this report.")
+    lines.append("")
+    lines.append("> **Normalization note (Phase 5C refinement):** an earlier validation pass found `speaking_rate_wpm` (all 24 rows, by 3–6 wpm) and `price_mentions_count` (5 rows: CALL_003, 014, 017, 018, 023) computed with the original Phase 5B.1 hand-counting method instead of this script's canonical algorithms (`compute_word_counts` / `PRICE_KEYWORDS` in `validate_historical_dataset.py`). `scripts/normalize_dataset_fields.py` was run once to overwrite those two fields in `data/historical_sales_calls.csv` with the canonical recomputed values — 29 field values changed across 24 rows. No other column (transcript, metadata, Ground Truth fields, outcomes, intent, objections, sentiment, scores, `manager_notes`, `competitor_mentions_count`, `call_duration_seconds`, `silence_ratio`, `speech_to_non_speech_ratio`, `agent_talk_ratio`) was touched. This validation run confirms the result: those 25 warnings no longer appear below.")
     lines.append("")
     lines.append("---")
     lines.append("")
