@@ -16,9 +16,9 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 | 5B.1 | Transcript and full CSV-row authoring | Complete |
 | 5C | Dataset Validation | Complete |
 | 6 | FastAPI mock service skeletons | Complete |
-| 7 | Docker Compose for local backend services | Not started |
-| 8 | curl/Postman testing documentation | Not started |
-| 9 | Transcription API decision + mock n8n webhook flow | Not started |
+| 7 | Docker Compose for local backend services | Complete (done as part of Phase 6) |
+| 8 | curl/Postman testing documentation | Complete (done as part of Phase 6) |
+| 9 | Transcription API decision + mock n8n webhook flow | In progress (Iteration 1 complete — transcription API decided) |
 | 10 | Connect n8n to mock FastAPI services (ngrok or local n8n) | Not started |
 | 11 | Implement NeMo Guardrails service | Not started |
 | 12 | Implement RAG service | Not started |
@@ -33,8 +33,8 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 
 ## Open decisions
 
-- **Transcription API:** Not yet chosen. To be decided at Phase 9.
-- **n8n local development approach:** ngrok vs. Cloudflare Tunnel vs. local n8n in Docker Compose. To be decided and documented at Phase 9.
+- **Transcription API:** Decided — AssemblyAI (Phase 9, Iteration 1). See [docs/technology_decisions.md](technology_decisions.md) for the full rationale.
+- **n8n local development approach:** ngrok vs. Cloudflare Tunnel vs. local n8n in Docker Compose. Still open — to be decided in a later Phase 9 iteration.
 
 ## Phase log
 
@@ -195,4 +195,22 @@ Built runnable FastAPI mock skeletons for all four backend services — `service
 
 **Environment note:** local ad-hoc testing (outside Docker) ran against whatever `fastapi`/`pydantic`/`uvicorn`/`pytest`/`httpx` versions were already present in this machine's global Python 3.14 install (newer than the Python-3.11-targeted, version-pinned `requirements.txt` each service ships) — Docker builds use the pinned versions on `python:3.11-slim` and are what actually matters for reproducibility; the local run was a faster inner-loop check only. Docker Desktop's engine was not running at the start of this phase and needed to be launched and waited on before `docker compose build`/`up` succeeded.
 
-Phase 6 complete. Committed as "Phase 6: FastAPI mock service skeletons". Phase 7 has not started — note that this phase's `docker-compose.yml` already covers Phase 7's core scope (Docker Compose for local backend services) at a basic level; Phase 7 may extend it further (e.g. shared networking with future services, volumes for ChromaDB/model artifacts) rather than starting from nothing.
+Phase 6 complete. Committed as "Phase 6: FastAPI mock service skeletons".
+
+**Phase 7 and Phase 8 absorbed into Phase 6 (same day):** on review, Phase 6's shared deliverables already fully satisfied Phase 7's and Phase 8's scope, rather than partially covering it — both are marked complete here instead of staying open as separate phases:
+
+- **Phase 7 (Docker Compose for local backend services) — complete.** `docker-compose.yml` runs all four services with fixed local ports (8001–8004) and health checks. This wasn't just written and left unverified: `docker compose build` and `docker compose up -d` were actually run, and all **4 containers reached Docker's `healthy` state** (confirmed via `docker compose ps`), including catching and fixing a real container-only crash in `rag_service` (a path-resolution bug that only surfaced inside Docker's shallower directory layout, invisible to local pytest).
+- **Phase 8 (curl/Postman testing documentation) — complete.** [docs/api_contracts.md](api_contracts.md) documents every endpoint's request/response shape with curl examples for all four services. This is backed by actual test execution, not just documentation: **53/53 pytest tests passing** across the four services' test suites, plus **15/15 live integration checks passing** (`scripts/test_mock_services.sh` run against the real running containers — all four health checks, one successful request per main endpoint, one intentionally invalid request per service).
+
+No new work was performed for this update — it corrects the phase table to reflect what Phase 6 had already delivered, per the user's explicit instruction not to repeat or recreate Phases 7 and 8.
+
+### Phase 9, Iteration 1 — Transcription API decision (complete)
+
+CLAUDE.md flags the transcription API explicitly as "Ask before implementing," and `docs/technology_decisions.md` had documented the evaluation criteria (Phase 3) without a decision. Presented four candidates — AssemblyAI, Deepgram, OpenAI Whisper API, Google Cloud Speech-to-Text — against those criteria, with AssemblyAI recommended primarily for built-in speaker diarization (load-bearing across the pipeline: the post-transcription Guardrails check, the Call Signal Analyser's `agent_talk_ratio`, and RAG corpus grounding all depend on `Agent:`/`Customer:` tagging) plus native webhook support for n8n integration. User confirmed **AssemblyAI**.
+
+Applied consistently:
+- `CLAUDE.md`: replaced all four "TBD Phase 9" placeholders (component 1 stack list, architecture flow text, Mermaid diagram, n8n node list) with "AssemblyAI."
+- `docs/technology_decisions.md`: replaced the placeholder "Transcription — TBD (Phase 9)" section with the full decision writeup (alternatives considered, why chosen, trade-offs accepted, why each alternative wasn't chosen), following the same format as the document's other entries.
+- `docs/PROGRESS.md`: resolved the "Transcription API" open decision; the "n8n local development approach" (ngrok vs. Cloudflare Tunnel vs. local n8n) open decision remains for a later Phase 9 iteration.
+
+**Deferred to later Phase 9 iterations (not started):** the mock n8n webhook flow itself, AssemblyAI API integration/credentials, and the n8n local-development-connectivity decision.

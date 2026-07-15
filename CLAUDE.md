@@ -208,7 +208,7 @@ When generating future transcripts, treat every conversation as an independent w
 
 1. **Frontend:** React Web Application (built near end of project — not at the beginning)
 2. **Orchestration:** n8n Cloud — the central workflow orchestrator. Coordinates every step of the pipeline directly: guardrails (both stages), transcription, Gemini structured extraction, an n8n AI Agent Node for intent classification and field enrichment (limited role — see Component responsibility boundaries), direct parallel calls to the RAG Service and Call Signal Analyser using the payloads the AI Agent Node prepared, a call to the LangGraph Reasoning Agent over their merged results, the Gemini Final Analysis LLM Chain that assembles everything into the complete final output, output guardrails, and a Router for confidence/category routing.
-3. **Transcription:** External API — TBD at Phase 9. Ask before implementing.
+3. **Transcription:** AssemblyAI — decided at Phase 9 (Iteration 1). Chosen primarily for built-in speaker diarization, which the pipeline depends on for `Agent:`/`Customer:` transcript tagging (used by the post-transcription Guardrails check, the Call Signal Analyser's `agent_talk_ratio`, and RAG grounding), plus native webhook support for clean n8n integration. See [docs/technology_decisions.md](docs/technology_decisions.md) for the full rationale and alternatives considered.
 4. **Gemini (via n8n):** used in two distinct roles, both orchestrated by n8n — never calls other services itself. (a) **Information Extractor:** structured semantic extraction only from the validated transcript (customer intent, main objection, customer sentiment, closing attempt, key sales events, relevant call metadata). (b) **Final Analysis LLM Chain:** combines the structured extraction, the RAG Service's results, the Call Signal Analyser's results, and the LangGraph agent's reasoning output into the complete final output JSON. Neither role generates coaching feedback or a final analysis on its own — extraction only extracts, and the Final Analysis Chain only synthesizes what n8n hands it.
 5. **Guardrails:** NeMo Guardrails + FastAPI + deterministic custom validation rules. NeMo Guardrails handles topic restrictions, unsafe content, prompt injection, jailbreak attempts, and other LLM-oriented input/output policies. Deterministic rules handle checks such as empty input, transcript length, missing citations, invalid schemas, unsupported file formats, and required fields. Input validation runs in two stages — pre-transcription file validation and post-transcription content guardrails — see Architecture flow.
 6. **RAG:** LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp. Embedding model: `sentence-transformers/all-MiniLM-L6-v2`. Retrieval of grounded historical-call evidence only — called directly by n8n (in parallel with the Call Signal Analyser), not by LangGraph.
@@ -246,7 +246,7 @@ User uploads sales call audio
 → React Web Application
 → n8n Cloud Workflow (central orchestrator)
 → Pre-Transcription File Validation (deterministic checks)
-→ Transcription API (TBD Phase 9)
+→ Transcription API (AssemblyAI)
 → Post-Transcription Input Content Guardrails (NeMo + deterministic rules)
 → Gemini Information Extractor (structured extraction only)
 → n8n AI Agent Node (intent classification and field enrichment — limited role, see below)
@@ -279,7 +279,7 @@ flowchart LR
 
     C --> D1["Pre-Transcription\nFile Validation\nDeterministic checks"]
 
-    D1 --> E["Transcription\nAudio to Text\nTBD — Phase 9"]
+    D1 --> E["Transcription\nAudio to Text\nAssemblyAI"]
 
     E --> D2["Post-Transcription\nInput Content Guardrails\nNeMo Guardrails + deterministic rules"]
 
@@ -353,7 +353,7 @@ Orchestration layer. Receives the submission, calls services, manages the AI wor
 1. Webhook Trigger
 2. Pre-Transcription File Validation HTTP Request (deterministic checks — file exists, MIME type/extension, size limit, optional duration limit, required metadata)
 3. IF pass/fail (file validation)
-4. Transcription API HTTP Request (TBD Phase 9)
+4. Transcription API HTTP Request (AssemblyAI)
 5. Post-Transcription Input Content Guardrails HTTP Request (NeMo + deterministic rules)
 6. IF pass/fail (content guardrails)
 7. Information Extractor — Gemini structured semantic extraction only (prompt engineering surface)

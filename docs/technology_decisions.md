@@ -32,20 +32,22 @@ A few constraints shaped every decision below:
 
 **Trade-off accepted:** n8n Cloud cannot reach `localhost` directly, requiring a tunnel (ngrok / Cloudflare Tunnel) or a local n8n instance during early phases — this is addressed explicitly in Phase 9. A more verbose workflow (15 nodes) than a design that nests some AI calls inside LangGraph; accepted because visibility into each step outweighs the extra node count for a project meant to be demoed and debugged node-by-node.
 
-## Transcription — TBD (Phase 9)
+## Transcription — AssemblyAI (decided Phase 9, Iteration 1)
 
-Not yet decided. Will be evaluated at Phase 9 against:
+**Alternatives considered:** Deepgram, OpenAI Whisper API, Google Cloud Speech-to-Text.
 
-- English transcription accuracy
-- optional Hebrew support
-- speaker diarization (needed for `Agent:`/`Customer:` tagging used by the Call Signal Analyser)
-- speaker labels and timestamps
-- supported audio formats
-- maximum file size and duration
-- latency
-- cost per minute
-- n8n Cloud integration complexity
-- reliability for a live demo
+**Evaluated against:** English transcription accuracy, optional Hebrew support, speaker diarization (needed for `Agent:`/`Customer:` tagging used throughout the pipeline), speaker labels and timestamps, supported audio formats, maximum file size and duration, latency, cost per minute, n8n Cloud integration complexity, reliability for a live demo.
+
+**Why chosen:** Speaker diarization was the deciding criterion, not raw accuracy — `Agent:`/`Customer:` tagging is load-bearing across the system, not cosmetic: the post-transcription Guardrails check looks for it, the Call Signal Analyser derives `agent_talk_ratio` from it, and the RAG corpus transcripts are speaker-tagged the same way (`dataset_design.md` §14). AssemblyAI has diarization built into the core transcription response (no separate pipeline step), plus native webhook support, which maps directly onto an n8n HTTP Request node without polling for job completion. Pricing and free-tier allowance are workable for a student project with repeated demo/testing cycles.
+
+**Trade-offs accepted:** No Hebrew support — acceptable since the project's language decision (CLAUDE.md) is English-only throughout, so this was never a hard requirement, just a nice-to-have evaluation criterion. Slightly behind Whisper on raw transcription accuracy in isolation, but Whisper has no built-in diarization, which would have required bolting on a separate speaker-diarization library or service — added complexity and another failure point this project doesn't need. Google Cloud Speech-to-Text was a close alternative on capability (diarization + Hebrew) but was ruled out for heavier integration overhead (GCP project/service-account auth) versus a simple API-key REST call.
+
+**Not chosen:**
+- **Deepgram** — comparable diarization and latency, close second; AssemblyAI's transcript-formatting and summarization tooling gave it a marginal edge for this project's needs, not a decisive technical gap.
+- **OpenAI Whisper API** — best raw accuracy and broadest language support, but no built-in diarization.
+- **Google Cloud Speech-to-Text** — capable and Hebrew-supporting, but the GCP auth/setup overhead didn't pay for itself given Hebrew isn't required.
+
+See [CLAUDE.md](../CLAUDE.md) component 1 (Final chosen technology stack, item 3) for where this fits in the overall stack, and [docs/PROGRESS.md](PROGRESS.md) for the Phase 9 log entry.
 
 ## n8n LLM — Gemini (two roles: Information Extractor and Final Analysis LLM Chain)
 
