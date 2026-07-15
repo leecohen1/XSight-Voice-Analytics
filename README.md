@@ -141,6 +141,7 @@ xsight-ai-sales-call-analytics/
 | [docs/technology_decisions.md](docs/technology_decisions.md) | Rationale for each technology choice |
 | [docs/architecture.md](docs/architecture.md) | Detailed architecture, request lifecycle, deployment topology |
 | [docs/dataset_design.md](docs/dataset_design.md) | RAG corpus and classifier dataset design: taxonomies, schemas, distributions, generation and validation rules |
+| [docs/api_contracts.md](docs/api_contracts.md) | Backend service HTTP contracts — endpoints, request/response shapes, curl examples (Phase 6 mock skeletons onward) |
 | `docs/prompt_engineering_log.md` | Prompt iteration log across all prompting surfaces (Phase 20) |
 
 ## Development approach
