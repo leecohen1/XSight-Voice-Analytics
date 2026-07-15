@@ -11,10 +11,10 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 | 3 | Technology decisions document | Complete |
 | 4 | Architecture document with Mermaid diagram | Complete |
 | 5A | Dataset Design | Complete |
-| 5B | Dataset Generation | In progress |
+| 5B | Dataset Generation | Complete |
 | 5B.0 | Historical call matrix design | Complete |
-| 5B.1 | Transcript and full CSV-row authoring | Not started |
-| 5C | Dataset Validation | Not started |
+| 5B.1 | Transcript and full CSV-row authoring | Complete |
+| 5C | Dataset Validation | Complete |
 | 6 | FastAPI mock service skeletons | Not started |
 | 7 | Docker Compose for local backend services | Not started |
 | 8 | curl/Postman testing documentation | Not started |
@@ -150,3 +150,28 @@ Verified in the document itself: outcome balance (8 Sale / 8 No Sale / 8 Follow-
 **Phase 5B.0 refinement (same day):** per user review, added a "Matrix Validation Status" checklist section at the end of the document (outcome/agent/objection/segment/industry/intent/sentiment/decision-maker diversity and contrast-case coverage, all verified), refined the CALL_014 (Case 6) wording from "the lead was already highly qualified and closed regardless of Michael's over-talking" to "the opportunity was already exceptionally strong before the conversation began, allowing the deal to close despite weaker sales execution" — separating opportunity quality from agent performance more cleanly — and added an explicit note that the matrix is the design blueprint for the RAG corpus, and every Phase 5B.1 transcript must remain fully consistent with it and with the Ground Truth Rules. No call assignments, outcomes, objections, distributions, or contrast cases were changed — wording and documentation only.
 
 Phase 5B.0 complete. Confirmed by user. Committed as "Phase 5B.0 refinement: finalize historical call matrix". Phase 5B.1 has not been started.
+
+### Phase 5B.1 — Transcript and full CSV-row authoring (complete)
+
+Authored the full historical-call record (transcript, structured fields, audio-derived features, `manager_notes`, Ground Truth checklist) for all 24 calls fixed by the Phase 5B.0 matrix, in five batches: `docs/generated_calls_batch_01.md` (CALL_001–004), `_02.md` (CALL_005–008), `_03.md` (CALL_009–012), `_04.md` (CALL_013–018), `_05.md` (CALL_019–024). No matrix assignment (agent, segment, industry, intent, objection, sentiment, outcome, closing attempt, lead quality, decision-maker presence, contrast-case role) was changed at any point — only the fields the matrix explicitly deferred were authored.
+
+**Mid-phase refinement — Transcript Writing Guidelines (after Batch 1):** the user reviewed Batch 1 and found the prose style too uniform across conversations (repeated acknowledgment templates like "That's fair...", "Understood.", "I'd rather... than...", every customer sounding similarly polished). Added a new **"Transcript Writing Guidelines"** section to `CLAUDE.md` (authentic conversation, dialogue diversity, a list of 8 banned reusable templates, natural spoken language, customer individuality, sales-rep consistency without signature phrases, independent generation per call) — applying from Batch 2 onward; Batch 1 was explicitly not rewritten retroactively. Committed separately as "Phase 5B.1 refinement: transcript writing guidelines".
+
+**CALL_006 revision (mid-Batch 2):** per user feedback, revised CALL_006 in place to add a discovery opening, humanize the technical-vetter customer with grounded asides, give the agent two consultative questions, and soften the ending into a conditional follow-up offer — while leaving metadata, outcome, and all structured-field judgments unchanged. Audio-derived fields (`call_duration_seconds`, `speaking_rate_wpm`, `agent_talk_ratio`) were recomputed from the revised (longer) transcript to stay grounded, and the change was documented transparently in the batch file.
+
+Each batch's self-QA (word/turn counts via `wc`/`grep`, banned-phrase greps, contrast-case verification) caught and fixed real issues before submission — most notably Batch 3, where an early draft of Daniel Cohen's "I'd rather ... than ..." closing line was accidentally reused across three of that batch's four calls. All 8 required contrast cases (`dataset_design.md` §13) were authored and individually verified against specific transcript evidence, including a dedicated line-by-line verification table for Case 6 (CALL_014, the highest-stakes row in the corpus — `Sale` outcome despite `agent_performance_score = 2`) and Case 3 (CALL_023, the mirror case — `Follow-up Needed` caused specifically by weak closing follow-through, not agent execution).
+
+Phase 5B.1 complete. Confirmed by user across all five batches. Committed per-batch as "Phase 5B.1: Batch N historical calls" (Batches 1, 3, 4; Batches 2 and 5 were committed together with Phase 5C, see below, since they had not yet been committed when Phase 5C began). Phase 5C has not been started.
+
+### Phase 5C — Dataset Validation (complete)
+
+Consolidated all 24 authored calls into `data/historical_sales_calls.csv` (26 columns, exact schema and column order from `dataset_design.md` §14 — `company_size`, a matrix-planning-only field, correctly excluded), and built `scripts/validate_historical_dataset.py`: a reusable, independent validator that reads the CSV directly (not the batch markdown source) and checks schema, enums, numeric ranges, corpus-wide distributions (outcome/agent/objection balance, all 8 contrast cases), Ground Truth consistency heuristics, audio-feature internal consistency (recomputed `speaking_rate_wpm` and `agent_talk_ratio` directly from transcript text), mention-count recomputation against a documented keyword list, and transcript-style patterns (banned templates, repeated openings/closings, verbal-tic frequency) — writing `docs/dataset_validation_report.md` and exiting 0 for `READY`/`READY WITH WARNINGS`, non-zero for `NOT READY`.
+
+**Result: READY WITH WARNINGS, 0 errors, 28 warnings.** No schema, Ground Truth, corpus-math, or hard-consistency rule was violated anywhere in the 24-row corpus. The warnings are all reported, not silently fixed, per the fix policy (only objective formatting issues — stray whitespace, boolean casing — are auto-corrected; none were needed, since the CSV was already clean):
+
+- **20 `speaking_rate_wpm` values** are 3–6 wpm higher than an independent recomputation — root-caused to a systematic word-counting artifact from Phase 5B.1 (the hand-computed word counts via `wc -w` counted the literal `Agent:`/`Customer:` speaker-tag token as one word per turn). Reported, not auto-corrected, since redefining and rewriting 20 stored values is a data change, not an indisputable formatting fix.
+- **5 mention-count mismatches** (`price_mentions_count` on CALL_003, 014, 017, 018, 023) between the original ad-hoc substring-based hand counts and the script's stricter word-boundary keyword matching — reported, not auto-corrected, for the same reason.
+- **Batch 1's banned-phrase content** (CALL_001–004) — confirmed as exactly the pre-existing, documented exception from the Transcript Writing Guidelines refinement above, not a new defect.
+- **Two corpus-wide style patterns not previously caught by per-batch review:** 20/24 calls (83%) open the agent's first line with the literal phrase "thanks for," and the filler word "honestly" appears 47 times across 21/24 calls. Neither violates an explicit rule (not on the 8-item banned list), but both are reported as genuine quality signals for any future revision pass.
+
+Phase 5C complete. Committed together with the two previously-uncommitted Phase 5B.1 batches (CALL_005–008, CALL_019–024) as "Phase 5C: validate and freeze historical dataset". Phase 6 has not started.
