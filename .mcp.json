@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "n8n-xsight-project": {
+      "type": "http",
+      "url": "https://maisonenchantee12.app.n8n.cloud/mcp-server/http"
+    }
+  }
+}

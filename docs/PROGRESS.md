@@ -18,7 +18,7 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 | 6 | FastAPI mock service skeletons | Complete |
 | 7 | Docker Compose for local backend services | Complete (done as part of Phase 6) |
 | 8 | curl/Postman testing documentation | Complete (done as part of Phase 6) |
-| 9 | Transcription API decision + mock n8n webhook flow | In progress (Iteration 1 complete — transcription API decided) |
+| 9 | Transcription API decision + mock n8n webhook flow | In progress (transcription API decided; webhook-flow Iteration 1 complete — intake through AssemblyAI job acceptance) |
 | 10 | Connect n8n to mock FastAPI services (ngrok or local n8n) | Not started |
 | 11 | Implement NeMo Guardrails service | Not started |
 | 12 | Implement RAG service | Not started |

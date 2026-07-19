@@ -1,0 +1,247 @@
+{
+  "name": "XSight - Phase 9 Iteration 1 - Intake to AssemblyAI",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "xsight/intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "id": "webhook_trigger",
+      "name": "Webhook Trigger",
+      "webhookId": "xsight-intake-phase9-iter1",
+      "position": [
+        -220,
+        260
+      ],
+      "notes": "Client POSTs multipart/form-data: audio_file (binary), agent_name, call_date, and optional customer_name/notes. n8n parses non-file fields into $json.body and the file into $binary.audio_file automatically for multipart requests."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GUARDRAILS_SERVICE_URL }}/check/input",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"stage\": \"pre_transcription\",\n  \"file_metadata\": {\n    \"filename\": \"{{ $binary.audio_file.fileName }}\",\n    \"mime_type\": \"{{ $binary.audio_file.mimeType }}\",\n    \"size_bytes\": {{ $binary.audio_file.fileSize }}\n  },\n  \"submission_metadata\": {\n    \"agent_name\": \"{{ $json.body.agent_name }}\",\n    \"call_date\": \"{{ $json.body.call_date }}\"\n  }\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "id": "guardrails_pre_check",
+      "name": "Pre-Transcription Guardrails Check",
+      "position": [
+        20,
+        260
+      ],
+      "notes": "Calls services/guardrails_service POST /check/input with stage=pre_transcription. GUARDRAILS_SERVICE_URL must point at a URL n8n Cloud can reach (tunnel/ngrok, or a deployed instance) -- see n8n/SETUP.md. duration_seconds is intentionally omitted here since it isn't known before the file is decoded; the guardrails check treats it as optional."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond_pass",
+              "leftValue": "={{ $json.pass }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "id": "if_guardrails_passed",
+      "name": "Guardrails Passed?",
+      "position": [
+        260,
+        260
+      ],
+      "notes": "Branches on the guardrails_service response's `pass` field. True -> continue to AssemblyAI. False -> reject immediately with the guardrails' own reason/flags."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"error\": {\n    \"code\": \"GUARDRAILS_REJECTED\",\n    \"message\": \"{{ $json.reason }}\",\n    \"details\": {{ JSON.stringify($json.flags) }}\n  }\n}",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "id": "respond_reject",
+      "name": "Respond - Guardrails Rejected",
+      "position": [
+        500,
+        420
+      ],
+      "notes": "Terminal node for the rejection branch. Returns 422 with the guardrails service's own reason/flags -- no AssemblyAI call is made for a rejected submission."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.assemblyai.com/v2/upload",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "audio_file",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "authorization",
+              "value": "={{ $env.ASSEMBLYAI_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "id": "assemblyai_upload",
+      "name": "Upload Audio to AssemblyAI",
+      "position": [
+        500,
+        140
+      ],
+      "notes": "Streams the raw audio bytes from $binary.audio_file to AssemblyAI's /v2/upload endpoint. Response is {\"upload_url\": \"...\"} -- a short-lived URL AssemblyAI hosts the file at, used by the next node. Does not start transcription by itself."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.assemblyai.com/v2/transcript",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"audio_url\": \"{{ $json.upload_url }}\",\n  \"speaker_labels\": true\n}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "authorization",
+              "value": "={{ $env.ASSEMBLYAI_API_KEY }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "id": "assemblyai_submit_job",
+      "name": "Submit Transcription Job",
+      "position": [
+        740,
+        140
+      ],
+      "notes": "speaker_labels: true enables AssemblyAI's diarization (the reason AssemblyAI was chosen -- see docs/technology_decisions.md). Response is {\"id\": \"<job_id>\", \"status\": \"queued\", ...} -- this is the job id acknowledged back to the client. NOT setting webhook_url here on purpose: callback handling is out of scope for this iteration."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"accepted\",\n  \"assemblyai_job_id\": \"{{ $json.id }}\",\n  \"assemblyai_status\": \"{{ $json.status }}\",\n  \"message\": \"Transcription job accepted. Callback/polling handling is not implemented yet (future Phase 9 iteration).\"\n}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "id": "respond_accept",
+      "name": "Respond - Job Accepted",
+      "position": [
+        980,
+        140
+      ],
+      "notes": "Terminal node for the success branch. Returns 202 Accepted with AssemblyAI's job id -- the client is not blocked waiting for transcription to finish."
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pre-Transcription Guardrails Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre-Transcription Guardrails Check": {
+      "main": [
+        [
+          {
+            "node": "Guardrails Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardrails Passed?": {
+      "main": [
+        [
+          {
+            "node": "Upload Audio to AssemblyAI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Guardrails Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Audio to AssemblyAI": {
+      "main": [
+        [
+          {
+            "node": "Submit Transcription Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Transcription Job": {
+      "main": [
+        [
+          {
+            "node": "Respond - Job Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
