@@ -1,60 +1,66 @@
 """Pydantic request/response models for the Guardrails Service.
 
-POST /check/input uses a discriminated union on `stage` (`pre_transcription`
-vs `post_transcription`), matching the two-stage design in CLAUDE.md §5 —
-one endpoint, stage-aware validation, rather than two separate endpoints.
+First real (non-mock) implementation of POST /check/input, covering the
+pre-transcription stage only. Every request field is optional at the
+schema level — presence and validity are enforced by the deterministic
+checks in app/guardrails.py, not by Pydantic type constraints, so a
+missing/invalid *value* (e.g. no filename) is reported as a normal
+`pass: false` result rather than a 422. Only genuinely malformed
+requests (wrong JSON types, fields exceeding the length limits below)
+are schema-level 422s.
 """
-from typing import Annotated, Literal, Optional, Union
+from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class FileMetadata(BaseModel):
-    filename: str
-    mime_type: str
-    size_bytes: int = Field(..., ge=0)
-    duration_seconds: Optional[float] = Field(default=None, ge=0)
+    filename: Optional[str] = Field(default=None, max_length=255)
+    mime_type: Optional[str] = Field(default=None, max_length=100)
+    file_size: Optional[float] = None
+    # Backward-compatible alias for older callers (e.g. the current n8n
+    # workflow) that still send `size_bytes`. Normalized into `file_size`
+    # below — app/guardrails.py reads only `file_size` and never sees this
+    # field, so there is exactly one code path for the size check.
+    size_bytes: Optional[float] = None
+    duration_seconds: Optional[float] = None
+
+    @model_validator(mode="after")
+    def _normalize_file_size_alias(self) -> "FileMetadata":
+        if self.file_size is None and self.size_bytes is not None:
+            self.file_size = self.size_bytes
+        return self
 
 
 class SubmissionMetadata(BaseModel):
-    agent_name: Optional[str] = None
-    call_date: Optional[str] = None
+    agent_name: Optional[str] = Field(default=None, max_length=200)
+    call_date: Optional[str] = Field(default=None, max_length=50)
+    customer_name: Optional[str] = Field(default=None, max_length=200)
+    notes: Optional[str] = Field(default=None, max_length=5000)
 
 
-class PreTranscriptionInput(BaseModel):
-    stage: Literal["pre_transcription"]
-    file_metadata: FileMetadata
+class CheckInputRequest(BaseModel):
+    stage: Optional[str] = Field(default=None, max_length=50)
+    file_metadata: FileMetadata = Field(default_factory=FileMetadata)
     submission_metadata: SubmissionMetadata = Field(default_factory=SubmissionMetadata)
 
 
-class PostTranscriptionInput(BaseModel):
-    stage: Literal["post_transcription"]
-    transcript: str = ""
-    submission_metadata: SubmissionMetadata = Field(default_factory=SubmissionMetadata)
+class Checks(BaseModel):
+    stage_valid: bool
+    file_present: bool
+    mime_type_allowed: bool
+    file_size_allowed: bool
+    metadata_valid: bool
+    prompt_injection_detected: bool
 
 
-CheckInputRequest = Annotated[
-    Union[PreTranscriptionInput, PostTranscriptionInput],
-    Field(discriminator="stage"),
-]
-
-
-class OutputCheckRequest(BaseModel):
-    final_analysis: dict = Field(default_factory=dict)
-    citations: list[str] = Field(default_factory=list)
-    historical_claims_present: bool = False
-    confidence: float = Field(..., ge=0.0, le=1.0)
-
-
-class CheckResponse(BaseModel):
+class CheckInputResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     passed: bool = Field(alias="pass")
-    reason: str
-    flags: list[str]
-    safe_text: Optional[str] = None
-    human_review_required: bool
-    mock: bool
+    stage: str
+    checks: Checks
+    reasons: list[str]
 
 
 class HealthResponse(BaseModel):
