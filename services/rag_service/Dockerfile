@@ -7,6 +7,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
+# Only the schema file itself is needed at runtime (app/filters.py's
+# allowlist source) — not the rest of services/rag_service/ingestion/
+# (conversion/validation scripts, generated output), which are dev-time
+# tooling only.
+COPY ingestion/metadata_schema.json ./ingestion/metadata_schema.json
+
 EXPOSE 8001
 
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \

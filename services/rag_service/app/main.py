@@ -1,28 +1,37 @@
-"""XSight RAG Service — FastAPI mock skeleton (Phase 6).
+"""XSight RAG Service (Phase 12) — Amazon Bedrock Knowledge Base integration.
 
-Real behavior (Phase 12): Amazon Bedrock Knowledge Base, queried through the
-Retrieve API only (not RetrieveAndGenerate), retrieving grounded
-historical-call evidence from per-call documents stored in Amazon S3. See
-services/rag_service/ingestion/ for the pipeline that converts
-data/historical_sales_calls.csv into those documents. This phase implements
-the API contract, validation, and error handling only — POST /query returns
-a deterministic mock response, clearly labeled `"mock": true`, and does not
-call Bedrock or ingest the CSV.
+POST /query retrieves grounded historical-call evidence via
+boto3 bedrock-agent-runtime Retrieve only (never RetrieveAndGenerate), from
+the Knowledge Base provisioned over per-call documents in Amazon S3 (see
+services/rag_service/ingestion/ for the pipeline that produced them from
+data/historical_sales_calls.csv). This service performs retrieval and
+deterministic response shaping only — it never calls Gemini or LangGraph.
 """
 import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from botocore.exceptions import BotoCoreError
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.models import HealthResponse, QueryRequest, QueryResponse, SimilarCall
+from app.bedrock_client import (
+    BedrockAccessDeniedError,
+    BedrockThrottlingError,
+    BedrockUnavailableError,
+    BedrockValidationError,
+    retrieve,
+)
+from app.config import ConfigurationError, load_settings
+from app.filters import FilterBuildError, build_filter, load_filter_allowlist
+from app.models import HealthResponse, QueryRequest, QueryResponse
+from app.response_builder import build_response
 
 SERVICE_NAME = "rag_service"
-SERVICE_VERSION = "0.1.0"
+SERVICE_VERSION = "0.2.0"
 
 # Local dev default: services/rag_service/app/main.py -> repo root is 3
 # parents up, so data/ resolves naturally without any extra setup. In
@@ -44,45 +53,18 @@ logger = logging.getLogger(SERVICE_NAME)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Optional confirmation only, per Phase 6 scope — never read/ingested here.
+    # historical_sales_calls.csv itself is never read by this service — the
+    # ingestion pipeline (services/rag_service/ingestion/) already converted
+    # it into the documents this service retrieves from Bedrock. This check
+    # is a startup sanity log only.
     if HISTORICAL_CSV_PATH.exists():
-        logger.info("Historical dataset found at %s (not read — Bedrock retrieval is Phase 12).", HISTORICAL_CSV_PATH)
+        logger.info("Historical dataset found at %s (reference only — retrieval goes through Bedrock).", HISTORICAL_CSV_PATH)
     else:
-        logger.warning("Historical dataset not found at %s. Not required for mock responses.", HISTORICAL_CSV_PATH)
+        logger.warning("Historical dataset not found at %s. Not required at runtime.", HISTORICAL_CSV_PATH)
     yield
 
 
 app = FastAPI(title="XSight RAG Service", version=SERVICE_VERSION, lifespan=lifespan)
-
-# Small, hardcoded mock corpus for deterministic responses only.
-# NOT sourced from data/historical_sales_calls.csv — real Bedrock retrieval is Phase 12.
-_MOCK_POOL = [
-    SimilarCall(
-        call_id="CALL_007", agent_name="Daniel Cohen", sale_result="Sale",
-        main_objection="price", similarity_score=0.89,
-        reason="Mock similarity result based on a price objection resolved through a quantified reframe.",
-    ),
-    SimilarCall(
-        call_id="CALL_002", agent_name="Sarah Levi", sale_result="Sale",
-        main_objection="integration", similarity_score=0.81,
-        reason="Mock similarity result based on a resolved integration concern.",
-    ),
-    SimilarCall(
-        call_id="CALL_015", agent_name="Michael Ben-David", sale_result="No Sale",
-        main_objection="price", similarity_score=0.75,
-        reason="Mock similarity result based on a price objection tied to the customer's own ROI model.",
-    ),
-    SimilarCall(
-        call_id="CALL_010", agent_name="Daniel Cohen", sale_result="No Sale",
-        main_objection="authority", similarity_score=0.69,
-        reason="Mock similarity result based on an authority/decision-maker gap.",
-    ),
-    SimilarCall(
-        call_id="CALL_023", agent_name="Noa Friedman", sale_result="Follow-up Needed",
-        main_objection="price", similarity_score=0.64,
-        reason="Mock similarity result based on a high-intent call left open by weak follow-through.",
-    ),
-]
 
 
 def _error_body(code: str, message: str, details: list) -> dict:
@@ -108,6 +90,64 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content=_error_body("INTERNAL_ERROR", "An unexpected error occurred.", []))
 
 
+# Bedrock/configuration errors are raised as plain exceptions from the
+# /query handler (not FastAPI HTTPExceptions) so app/bedrock_client.py and
+# app/config.py stay framework-agnostic — these handlers are what translate
+# them into stable HTTP responses. Every one of them logs the real
+# exception server-side and returns only a generic, safe message to the
+# client — no AWS stack trace, request ID, or internal detail ever crosses
+# that boundary.
+@app.exception_handler(ConfigurationError)
+async def configuration_error_handler(request: Request, exc: ConfigurationError):
+    logger.error("Configuration error on %s: %s", request.url.path, exc)
+    return JSONResponse(status_code=503, content=_error_body(
+        "SERVICE_MISCONFIGURED", "The service is missing required configuration.", []))
+
+
+@app.exception_handler(FilterBuildError)
+async def filter_build_error_handler(request: Request, exc: FilterBuildError):
+    logger.error("Filter builder error on %s: %s", request.url.path, exc)
+    return JSONResponse(status_code=503, content=_error_body(
+        "SERVICE_MISCONFIGURED", "The service could not load its metadata filter policy.", []))
+
+
+@app.exception_handler(BedrockAccessDeniedError)
+async def bedrock_access_denied_handler(request: Request, exc: BedrockAccessDeniedError):
+    logger.error("Bedrock access denied on %s: %s", request.url.path, exc)
+    return JSONResponse(status_code=502, content=_error_body(
+        "UPSTREAM_ACCESS_DENIED", "The service could not authenticate to Amazon Bedrock.", []))
+
+
+@app.exception_handler(BedrockValidationError)
+async def bedrock_validation_error_handler(request: Request, exc: BedrockValidationError):
+    logger.warning("Bedrock rejected the request on %s: %s", request.url.path, exc)
+    return JSONResponse(status_code=400, content=_error_body(
+        "UPSTREAM_VALIDATION_ERROR", "Amazon Bedrock rejected the retrieval request.", []))
+
+
+@app.exception_handler(BedrockThrottlingError)
+async def bedrock_throttling_handler(request: Request, exc: BedrockThrottlingError):
+    logger.warning("Bedrock throttled the request on %s: %s", request.url.path, exc)
+    return JSONResponse(status_code=429, content=_error_body(
+        "UPSTREAM_THROTTLED", "Amazon Bedrock is throttling requests. Retry shortly.", []))
+
+
+@app.exception_handler(BedrockUnavailableError)
+async def bedrock_unavailable_handler(request: Request, exc: BedrockUnavailableError):
+    logger.error("Bedrock unavailable on %s: %s", request.url.path, exc)
+    return JSONResponse(status_code=503, content=_error_body(
+        "UPSTREAM_UNAVAILABLE", "Amazon Bedrock did not respond successfully.", []))
+
+
+@app.exception_handler(BotoCoreError)
+async def botocore_error_handler(request: Request, exc: BotoCoreError):
+    # Catch-all for botocore errors not already mapped by bedrock_client.py
+    # (e.g. credential resolution failures) — still never a raw traceback.
+    logger.exception("Unhandled botocore error on %s", request.url.path)
+    return JSONResponse(status_code=503, content=_error_body(
+        "UPSTREAM_UNAVAILABLE", "Amazon Bedrock did not respond successfully.", []))
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok", service=SERVICE_NAME, version=SERVICE_VERSION)
@@ -115,20 +155,26 @@ async def health() -> HealthResponse:
 
 @app.post("/query", response_model=QueryResponse)
 async def query(payload: QueryRequest) -> QueryResponse:
-    logger.info("Mock /query received: top_k=%s, transcript_len=%s", payload.top_k, len(payload.transcript))
+    logger.info("/query received: top_k=%s, transcript_len=%s, filters=%s",
+                payload.top_k, len(payload.transcript), list((payload.filters or {}).keys()))
 
-    similar_calls = _MOCK_POOL[: payload.top_k]
-    citations = [c.call_id for c in similar_calls]
+    settings = load_settings()  # raises ConfigurationError -> handled above
+    allowlist = load_filter_allowlist()  # raises FilterBuildError -> handled above
 
-    insight = (
-        f"Mock grounded insight referencing {len(citations)} historical call(s) "
-        f"({', '.join(citations)}). Real retrieval is not implemented yet."
+    bedrock_filter, filter_requested, dropped_keys = build_filter(payload.filters, allowlist)
+    if dropped_keys:
+        logger.info("Dropped unsupported/invalid filter key(s): %s", dropped_keys)
+
+    outcome = retrieve(
+        settings=settings,
+        query_text=payload.transcript,
+        number_of_results=payload.top_k,
+        bedrock_filter=bedrock_filter,
     )
 
-    return QueryResponse(
-        similar_calls=similar_calls,
-        insight=insight,
-        citations=citations,
-        grounded=True,
-        mock=True,
+    return build_response(
+        outcome=outcome,
+        knowledge_base_id=settings.knowledge_base_id,
+        filter_requested=filter_requested,
+        dropped_filter_keys=dropped_keys,
     )

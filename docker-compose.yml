@@ -1,8 +1,10 @@
-# XSight local backend — Phase 6 mock service skeletons.
+# XSight local backend services.
 # All four services are independently deployable FastAPI apps; this file
 # just runs them side by side with fixed local ports for curl/Postman
-# testing. No shared network dependency beyond the default compose network,
-# and no external services (databases, model servers) are wired up yet.
+# testing. No shared network dependency beyond the default compose network.
+# rag_service is the real Amazon Bedrock Knowledge Base implementation
+# (Phase 12); call_signal_analyser, guardrails_service, and langgraph_agent
+# remain Phase 6 mock skeletons.
 
 services:
   rag_service:
@@ -13,6 +15,19 @@ services:
       - "8001:8001"
     environment:
       - HISTORICAL_CALLS_CSV_PATH=/data/historical_sales_calls.csv
+      - AWS_REGION=us-east-2
+      - BEDROCK_KNOWLEDGE_BASE_ID=EDCC0WT0OB
+      - BEDROCK_DATA_SOURCE_ID=UDNMPNSGXZ
+      - BEDROCK_EMBEDDING_MODEL_ID=amazon.titan-embed-text-v2:0
+      - BEDROCK_VECTOR_INDEX_NAME=xsight-historical-calls-index
+      - XSIGHT_S3_BUCKET=xsight-sales-call-analytics-881490130721-us-east-2
+      - XSIGHT_S3_PREFIX=xsight/bedrock/historical-calls/v1/
+      # AWS credentials are never hardcoded here — ${...} pulls from the host
+      # shell/environment (or a .env file at the compose project root, which
+      # is gitignored), never from a value written into this tracked file.
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
     volumes:
       - ./data:/data:ro
     healthcheck:

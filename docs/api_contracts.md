@@ -55,39 +55,61 @@ curl http://localhost:8001/health
 
 ### `POST /query`
 
+Real implementation (Phase 12) — retrieves from the provisioned Amazon
+Bedrock Knowledge Base (`Retrieve` API only) over Amazon S3 Vectors. See
+[services/rag_service/README.md](../services/rag_service/README.md) for the
+full contract and [docs/PROGRESS.md](PROGRESS.md) for the provisioning
+record.
+
 ```bash
 curl -X POST http://localhost:8001/query \
   -H "Content-Type: application/json" \
   -d '{
     "transcript": "Agent: Hi there, thanks for the call. Customer: Sure, happy to talk about pricing.",
     "metadata": {"agent_name": "Sarah Levi", "call_duration_seconds": 420, "sale_result": "Sale"},
-    "top_k": 3
+    "top_k": 3,
+    "filters": {"main_objection": "price"}
   }'
 ```
 
-**Validation:** `transcript` required, min 20 characters. `top_k` integer, 1–10. `metadata` optional, all sub-fields optional.
+**Validation:** `transcript` required, min 20 characters. `top_k` integer, 1–10. `metadata` optional, all sub-fields optional. `filters` optional — only the 11 fields marked `allowed_for_filtering: true` in `services/rag_service/ingestion/metadata_schema.json` are honored; other keys are dropped, not rejected. At most one filter is ever applied.
 
-**Response (mock, deterministic):**
+**Response:**
 
 ```json
 {
   "similar_calls": [
-    {"call_id": "CALL_007", "agent_name": "Daniel Cohen", "sale_result": "Sale", "main_objection": "price", "similarity_score": 0.89, "reason": "Mock similarity result based on a price objection resolved through a quantified reframe."}
+    {"call_id": "CALL_023", "agent_name": "Noa Friedman", "sale_result": "Follow-up Needed", "main_objection": "price", "similarity_score": 0.67, "reason": "Historical call CALL_023 with a 'price' objection; outcome: Follow-up Needed."}
   ],
-  "insight": "Mock grounded insight referencing 1 historical call(s) (CALL_007). Real retrieval is not implemented yet.",
-  "citations": ["CALL_007"],
+  "insight": "Found 1 similar historical call(s) (CALL_023) — see each result's reason for the specific match.",
+  "citations": ["CALL_023"],
   "grounded": true,
-  "mock": true
+  "retrieval_metadata": {
+    "knowledge_base_id": "EDCC0WT0OB",
+    "search_type": "SEMANTIC",
+    "filter_requested": "main_objection",
+    "filter_applied": true,
+    "dropped_filter_keys": [],
+    "results_returned": 1,
+    "results_above_threshold": 1
+  }
 }
 ```
 
-Drawn from a fixed 5-call hardcoded pool, sliced to `top_k` — not sourced from `data/historical_sales_calls.csv` (its existence is optionally logged at startup only).
+Every `similar_calls[]` entry is read from Bedrock's own returned metadata — never fabricated. A result missing a required field is dropped, not filled in. When nothing clears the similarity-score floor, `insight` is `"Not enough evidence to identify similar historical calls for this transcript."`, `citations` is empty, and `grounded` is `false`.
 
 **Invalid request example:**
 
 ```bash
 curl -i -X POST http://localhost:8001/query -H "Content-Type: application/json" -d '{"transcript": ""}'
 # HTTP/1.1 422 Unprocessable Entity
+```
+
+**Upstream error example** (Bedrock throttling, access denial, etc. — see `services/rag_service/README.md`'s error table for the full mapping):
+
+```bash
+# HTTP/1.1 429 Too Many Requests
+{"error": {"code": "UPSTREAM_THROTTLED", "message": "Amazon Bedrock is throttling requests. Retry shortly.", "details": []}}
 ```
 
 ---
