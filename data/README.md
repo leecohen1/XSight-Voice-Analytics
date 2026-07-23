@@ -7,7 +7,7 @@ Historical sales calls datasets for XSight — two separate files, not one.
 - `call_signal_training.csv` — Not yet implemented. Planned for a later Phase 5B sub-step (PyTorch classifier training data).
 
 **Files:**
-- `historical_sales_calls.csv` — the RAG corpus: 24 detailed, hand-authored records with full transcripts, for RAG retrieval quality (ChromaDB ingestion in a later phase). Sourced from `docs/generated_calls_batch_01.md` through `_05.md` (Phase 5B.1) and validated by `scripts/validate_historical_dataset.py` (Phase 5C) — see [docs/dataset_validation_report.md](../docs/dataset_validation_report.md) for the full validation results (status: READY WITH WARNINGS).
+- `historical_sales_calls.csv` — the RAG corpus: 24 detailed, hand-authored records with full transcripts, for RAG retrieval quality. This CSV is the canonical source for `services/rag_service/ingestion/`, which converts it into per-call documents for Amazon Bedrock Knowledge Base ingestion. Sourced from `docs/generated_calls_batch_01.md` through `_05.md` (Phase 5B.1) and validated by `scripts/validate_historical_dataset.py` (Phase 5C) — see [docs/dataset_validation_report.md](../docs/dataset_validation_report.md) for the full validation results (status: READY WITH WARNINGS).
 - `call_signal_training.csv` — the classifier training dataset: ~150–300 synthetic/adapted rows with features and labels only (no full transcript), for PyTorch classifier training. Not yet generated.
 
 All content in English. The two files share a compatible column schema (the training file omits `transcript`) so feature-engineering logic can be reused, but they serve different purposes and are not interchangeable — see `docs/dataset_design.md` §2.
@@ -16,7 +16,7 @@ All content in English. The two files share a compatible column schema (the trai
 
 Re-run the validator any time the CSV changes:
 
-```
+```bash
 python scripts/validate_historical_dataset.py
 ```
 
@@ -24,4 +24,4 @@ This checks schema, enums, numeric ranges, corpus-wide distributions (outcome/ag
 
 See [CLAUDE.md](../CLAUDE.md) for the full column schema and content requirements, and [docs/dataset_design.md](../docs/dataset_design.md) for the complete data design.
 
-**Note:** Real audio files, ChromaDB data, and any dataset containing real customer information must never be committed to this repository (see [.gitignore](../.gitignore)). Every row in `historical_sales_calls.csv` is fictional, per the project's fictional B2B SaaS product context.
+**Note:** Real audio files, generated Bedrock ingestion artifacts (`services/rag_service/ingestion/output/`), and any dataset containing real customer information must never be committed to this repository (see [.gitignore](../.gitignore)). Every row in `historical_sales_calls.csv` is fictional, per the project's fictional B2B SaaS product context.

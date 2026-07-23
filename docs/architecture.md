@@ -14,7 +14,7 @@ flowchart LR
 
     C --> D1["Pre-Transcription\nFile Validation\nDeterministic checks"]
 
-    D1 --> E["Transcription\nAudio to Text\nTBD — Phase 9"]
+    D1 --> E["Transcription\nAudio to Text\nAssemblyAI"]
 
     E --> D2["Post-Transcription\nInput Content Guardrails\nNeMo Guardrails + deterministic rules"]
 
@@ -22,7 +22,7 @@ flowchart LR
 
     F --> AA["n8n AI Agent Node\nIntent classification, field enrichment,\nservice relevance, payload prep\nlimited role — no reasoning, no final report"]
 
-    AA --> H["Sales Call RAG Service\nLangChain + ChromaDB + Llama.cpp"]
+    AA --> H["Sales Call RAG Service\nFastAPI + Bedrock Knowledge Base Retrieve"]
     AA --> I["Voice / Call Signal Analyser\nPyTorch — transcript + lightweight audio features"]
 
     H --> MG["Merge Results"]
@@ -42,14 +42,14 @@ flowchart LR
 
     subgraph DataModels["Data and Local AI Components"]
         N["historical_sales_calls.csv\nRAG corpus"]
-        O["ChromaDB Vector Store"]
-        P["Llama.cpp\nLocal RAG Generation\ninside RAG service"]
+        O["S3\nOne document per call"]
+        P["Amazon Bedrock Knowledge Base\nManaged embedding + retrieval"]
         Q["Ollama Assistant\nSidebar only — separate runtime"]
         T["call_signal_training.csv\nClassifier training data"]
     end
 
     N --> O
-    O --> H
+    O --> P
     P --> H
     Q --> B
     T -.->|offline training, Phase 13| I
@@ -90,7 +90,7 @@ An IF node (node 3) branches on the result: fail → respond immediately with a 
 
 ### 3.3 Transcription (n8n node 4)
 
-The audio file is sent to the transcription API (provider TBD — Phase 9). Output is a transcript, ideally speaker-tagged (`Agent:`/`Customer:`) if the chosen provider supports diarization — this tagging is what later enables `agent_talk_ratio` in the Call Signal Analyser.
+The audio file is sent to AssemblyAI (decided at Phase 9, Iteration 1). Output is a speaker-tagged transcript (`Agent:`/`Customer:`) — AssemblyAI's built-in diarization is what enables `agent_talk_ratio` in the Call Signal Analyser.
 
 ### 3.4 Post-transcription input content guardrails (n8n nodes 5–6)
 
@@ -123,7 +123,7 @@ It explicitly does **not**: generate the final report, replace LangGraph's reaso
 
 n8n fans out to two independent FastAPI services at once, using the payloads the AI Agent Node prepared, since neither depends on the other's output:
 
-- **RAG Service** (`POST /query`, node 9) — retrieves similar historical calls from ChromaDB, cited by `call_id`.
+- **RAG Service** (`POST /query`, node 9) — retrieves similar historical calls from the Amazon Bedrock Knowledge Base (via the `Retrieve` API only, not `RetrieveAndGenerate`), cited by `call_id`.
 - **Call Signal Analyser** (`POST /analyse-call`, node 10) — receives the audio file (or a reference to it) alongside the transcript and extraction, performs its own lightweight audio preprocessing, and scores the call (predicted outcome, lead quality, agent performance, risk level) returning a `confidence` value and a `feature_summary`.
 
 A Merge Results node (node 11) waits for both branches to complete before continuing — the next step needs both results.
@@ -175,28 +175,30 @@ n8n responds to the original webhook call with the final JSON payload (node 16).
 | Transcription | external (TBD) | provider-specific | n8n | — | audio → text only |
 | Gemini — Information Extractor | external API | via n8n node | n8n | — | structured semantic extraction only — never generates coaching feedback, recommendations, or the final analysis |
 | n8n AI Agent Node | inside the n8n workflow (not a separate service) | n8n node | n8n | Gemini's extraction | **limited role**: classify submission intent, enrich extracted fields, determine which downstream services are relevant, prepare their payloads. Must not reason over results, generate coaching feedback, reconcile evidence, or invent information |
-| RAG service | `services/rag_service` | `POST /query` | n8n, directly (parallel with Call Signal Analyser), using the AI Agent Node's payload | ChromaDB, Llama.cpp, `historical_sales_calls.csv` | retrieval of grounded historical-call evidence only |
+| RAG service | `services/rag_service` | `POST /query` | n8n, directly (parallel with Call Signal Analyser), using the AI Agent Node's payload | Amazon S3, Amazon Bedrock Knowledge Base, `historical_sales_calls.csv` (converted into per-call S3 documents by `services/rag_service/ingestion/`) | retrieval of grounded historical-call evidence only |
 | Call Signal Analyser | `services/call_signal_analyser` | `POST /analyse-call` | n8n, directly (parallel with RAG service), using the AI Agent Node's payload | trained PyTorch model, the audio file (forwarded by n8n) | prediction, scoring, confidence estimation only — consumes Gemini's extraction rather than re-deriving it; performs its own lightweight audio preprocessing |
-| LangGraph agent | `services/langgraph_agent` | `POST /agent/run` | n8n, after RAG + Call Signal Analyser both return and are merged | none (reasons over data n8n provides — does not call other services) | multi-step reasoning only — evidence-conflict detection, coaching points, recommended action; does **not** produce the final report |
+| LangGraph agent | `services/langgraph_agent` | `POST /agent/run` | n8n, after RAG + Call Signal Analyser both return and are merged | none — reasons over the RAG and Call Signal Analyser results n8n already fetched; does not call the RAG Service, the Call Signal Analyser, or Bedrock itself | multi-step reasoning only — evidence-conflict detection, coaching points, recommended action; does **not** produce the final report |
 | Gemini — Final Analysis LLM Chain | external API | via n8n node | n8n, after LangGraph returns | — (reads what n8n passes it) | **the component that assembles the complete final output JSON**, from the extraction, RAG results, signal-analyser results, and LangGraph's reasoning |
-| Ollama assistant | external runtime | local HTTP API | React sidebar only | — (independent of Llama.cpp) | conversational sidebar assistant only |
+| Ollama assistant | external runtime | local HTTP API | React sidebar only | — (the project's only local LLM runtime; see [technology_decisions.md](technology_decisions.md#local-assistant--ollama)) | conversational sidebar assistant only |
 
 n8n is the only component that calls more than one other component — every AI service is a leaf n8n calls directly and gets a result back from; none of them call each other.
 
 ## 5. Data flow
 
-- **`data/historical_sales_calls.csv`** — the RAG corpus: at least 20 detailed historical call transcripts with rich metadata. Ingested into ChromaDB with HuggingFace embeddings (offline step); queried at request time by the RAG service.
+- **`data/historical_sales_calls.csv`** — the RAG corpus: at least 20 detailed historical call transcripts with rich metadata. This CSV is the only canonical source of truth for the corpus; it is never queried directly at request time.
 - **`data/call_signal_training.csv`** — the classifier training dataset: ~150–300 synthetic/adapted feature rows (no full transcripts), loaded via pandas for PyTorch training (offline, Phase 13). This is a separate file from the RAG corpus, not the same file reused — see [technology_decisions.md](technology_decisions.md#dataset-design-two-separate-files-not-one) for why. The two files share a compatible column schema (the training file omits `transcript`) so feature-engineering code can be reused between them.
-- **ChromaDB** is populated once (offline ingestion step) from `historical_sales_calls.csv` and queried at request time by the RAG service — it is not written to during a normal analysis request.
-- **Llama.cpp** runs only inside the RAG service process, generating the grounded, citation-constrained `insight` text from the retrieved calls.
-- **Ollama** runs as a fully separate process, serving only the React sidebar assistant; it never touches the RAG service, the historical calls data, or ChromaDB directly.
+- **Offline ingestion (already built, ahead of the Phase 12 service):** `services/rag_service/ingestion/` converts each CSV row into one text document plus one metadata sidecar, matching Amazon Bedrock Knowledge Base's S3 ingestion format. Those documents are uploaded to Amazon S3, and a Bedrock Knowledge Base indexes that S3 prefix — this indexing step happens offline, not during a request.
+- **At request time**, the RAG service queries the Bedrock Knowledge Base through the `Retrieve` API only (not `RetrieveAndGenerate`) and builds `similar_calls` / `insight` / `citations` from the returned matches using deterministic template logic — no local vector store, no local embedding model, and no additional LLM call inside the RAG service.
+- **Ollama** runs as a fully separate process, serving only the React sidebar assistant; it never touches the RAG service, the historical calls data, or the Bedrock Knowledge Base directly, and — since the RAG service no longer runs a local LLM — Ollama is now the project's only local LLM runtime.
 - **The audio file** is validated (Stage A), sent to the transcription API, and also forwarded by n8n to the Call Signal Analyser's request payload — that service performs its own lightweight audio preprocessing internally rather than relying on a separate preprocessing step or service.
 
 ## 6. Deployment topology
 
 ### Local development (Phases 1–15)
 
-All four FastAPI services, plus ChromaDB (embedded) and the Llama.cpp/Ollama runtimes, run locally — via Docker Compose from Phase 7 onward. n8n Cloud cannot reach `localhost`, so local services are exposed to it through ngrok or a Cloudflare Tunnel, or n8n itself is run locally in Docker Compose during early phases (decision documented at Phase 9, per [CLAUDE.md](../CLAUDE.md#n8n-and-local-services-connectivity-note)). The React frontend does not exist yet during this period; every service is exercised via curl, Postman, or direct n8n webhook calls.
+All four FastAPI services, plus the Ollama runtime, run locally — via Docker Compose from Phase 7 onward. n8n Cloud cannot reach `localhost`, so local services are exposed to it through ngrok or a Cloudflare Tunnel, or n8n itself is run locally in Docker Compose during early phases (decision documented at Phase 9, per [CLAUDE.md](../CLAUDE.md#n8n-and-local-services-connectivity-note)). The React frontend does not exist yet during this period; every service is exercised via curl, Postman, or direct n8n webhook calls.
+
+Unlike the originally planned embedded ChromaDB, Amazon Bedrock Knowledge Base is an AWS-managed service with no local/offline mode. Once the Phase 12 RAG service is implemented, it needs valid AWS credentials and network access to Bedrock even during local development — the rest of the stack (guardrails, call signal analyser, LangGraph, Ollama) stays fully local. No AWS resources have been provisioned yet; this is a known consequence of the Phase 5C architecture decision, not something already set up.
 
 ### Production (Phase 19+)
 
@@ -218,8 +220,8 @@ The same Docker Compose configuration is deployed to a single AWS EC2 instance, 
 
 ## 8. Open items carried from technology decisions
 
-- Exact transcription provider (Phase 9) — affects whether diarization is available, which in turn affects whether `agent_talk_ratio` can be computed.
-- n8n-to-localhost connectivity approach for development (Phase 9).
+- n8n-to-localhost connectivity approach for development (Phase 9) — still open; AssemblyAI itself (the transcription provider) was decided at Phase 9, Iteration 1, and the diarization it provides confirms `agent_talk_ratio` is computable.
 - Exact lightweight audio library for the Call Signal Analyser, and the exact mechanism n8n uses to forward the audio file/reference to it (Phase 13) — the design decision that the analyser preprocesses audio itself (rather than a separate preprocessing service) is settled; the implementation detail is not.
 - LLM backend for LangGraph's Planner/Synthesizer nodes (Phase 14) — not yet decided; see [CLAUDE.md §6](../CLAUDE.md#6-langgraph-sales-agent).
 - Exact classification/enrichment logic and the underlying model for the n8n AI Agent Node (Phase 9–10 n8n wiring) — the node's scope is fixed (see §3.6), but which LLM backs it is not yet specified.
+- Amazon Bedrock Knowledge Base provisioning (S3 bucket, Knowledge Base resource, Amazon Titan Text Embeddings V2 configuration) and the RAG service's actual `/query` implementation (Phase 12) — the data-preparation pipeline is already built and validated (`services/rag_service/ingestion/`), but no AWS resource exists yet and the FastAPI service still returns the Phase 6 mock.

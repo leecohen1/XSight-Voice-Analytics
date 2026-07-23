@@ -597,7 +597,7 @@ def write_report(status, errors, warnings, fixes_applied, header, rows,
     lines.append("")
     if errors:
         for e in errors:
-            lines.append(f"- ❌ {e}")
+            lines.append(f"- {e}")
     else:
         lines.append("None.")
     lines.append("")
@@ -605,7 +605,7 @@ def write_report(status, errors, warnings, fixes_applied, header, rows,
     lines.append("")
     if warnings:
         for w in warnings:
-            lines.append(f"- ⚠️ {w}")
+            lines.append(f"- {w}")
     else:
         lines.append("None.")
     lines.append("")
@@ -613,7 +613,7 @@ def write_report(status, errors, warnings, fixes_applied, header, rows,
     lines.append("")
     if fixes_applied:
         for fx in fixes_applied:
-            lines.append(f"- 🔧 {fx}")
+            lines.append(f"- {fx}")
     else:
         lines.append("None — no objective formatting errors (stray whitespace, boolean casing) were found; the CSV was already clean.")
     lines.append("")
@@ -628,7 +628,7 @@ def write_report(status, errors, warnings, fixes_applied, header, rows,
     elif status == "READY WITH WARNINGS":
         lines.append(f"Zero schema, Ground Truth, corpus-math, or hard-consistency errors were found ({len(errors)} errors). {len(warnings)} warning(s) were surfaced — style/consistency signals (documented Batch 1 exception, mention-count methodology differences, corpus-wide opener/filler-word patterns, or minor audio-consistency drift) that do not violate any explicit rule in `dataset_design.md` or `CLAUDE.md`. The dataset is ready to freeze; the warnings are recommended reading for anyone doing further RAG-quality tuning, not blockers.")
     else:
-        lines.append(f"{len(errors)} error(s) were found that must be resolved before this dataset can be frozen. Do not proceed to CSV consumption (ChromaDB ingestion, RAG service) until these are fixed and this script is re-run to a passing status.")
+        lines.append(f"{len(errors)} error(s) were found that must be resolved before this dataset can be frozen. Do not proceed to CSV consumption (Bedrock Knowledge Base ingestion, RAG service) until these are fixed and this script is re-run to a passing status.")
 
     REPORT_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

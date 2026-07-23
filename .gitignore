@@ -102,6 +102,11 @@ chroma_data/
 demo/audio_samples/
 
 ## ==============================
+## Bedrock ingestion output (regenerated from data/historical_sales_calls.csv)
+## ==============================
+services/rag_service/ingestion/output/
+
+## ==============================
 ## Local data artifacts
 ## ==============================
 *.log

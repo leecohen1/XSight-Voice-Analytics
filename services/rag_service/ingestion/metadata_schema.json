@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "dataset_version": 1,
+  "description": "Single shared policy source for the Bedrock ingestion pipeline. convert_csv_to_documents.py and validate_documents.py both load this file (via schema_loader.py) instead of hardcoding field lists, so the two scripts cannot drift apart. historical_sales_calls.csv is the only canonical source of truth; this file only describes how its columns map into the generated TXT documents and metadata sidecars.",
+
+  "txt_structure": {
+    "sections": [
+      {"name": "call_id_line", "label": "Call ID", "source_field": "call_id"},
+      {
+        "name": "retrieval_context",
+        "label": "Retrieval Context",
+        "fields": ["customer_segment", "industry", "main_objection", "customer_intent", "customer_sentiment"],
+        "field_labels": {
+          "customer_segment": "Customer Segment",
+          "industry": "Industry",
+          "main_objection": "Main Objection",
+          "customer_intent": "Customer Intent",
+          "customer_sentiment": "Customer Sentiment"
+        },
+        "note": "Values are copied verbatim from the CSV (e.g. 'price', not 'Price') — only the field labels are formatted for readability. No scores, voice metrics, booleans, or outcome values belong in this section."
+      },
+      {"name": "transcript", "label": "Transcript", "source_field": "transcript"},
+      {"name": "manager_review", "label": "Manager Review — Secondary Evidence", "source_field": "manager_notes"}
+    ]
+  },
+
+  "generated_metadata_fields": {
+    "source_type": {"type": "string", "value": "historical_sales_call"},
+    "dataset_version": {"type": "number", "value_from": "dataset_version"},
+    "schema_version": {"type": "number", "value_from": "schema_version"}
+  },
+
+  "fields": {
+    "call_id": {
+      "source_column": "call_id",
+      "required": true,
+      "type": "string",
+      "destination": "both",
+      "category": "identity",
+      "allowed_for_filtering": false,
+      "validation": {"non_empty": true, "unique": true},
+      "notes": "Used for citation, traceability, result display, debugging, deduplication. Not a retrieval filter — filtering by an exact call_id doesn't serve similarity retrieval."
+    },
+    "agent_name": {
+      "source_column": "agent_name",
+      "required": true,
+      "type": "string",
+      "destination": "metadata",
+      "category": "identity",
+      "allowed_for_filtering": false,
+      "validation": {"non_empty": true},
+      "notes": "Identity metadata only, per the approved classification (citation/traceability/result-display/debugging/dedup — filtering not listed). Not part of the TXT Retrieval Context (only the 5 semantic-context fields are). Excluded from the initial filter allowlist; revisit if an 'agent's own call history' filter use case is needed later."
+    },
+
+    "customer_segment": {
+      "source_column": "customer_segment",
+      "required": true,
+      "type": "string",
+      "destination": "both",
+      "category": "semantic_context",
+      "allowed_for_filtering": true,
+      "validation": {"enum": ["SMB", "Mid-Market", "Enterprise"]}
+    },
+    "industry": {
+      "source_column": "industry",
+      "required": true,
+      "type": "string",
+      "destination": "both",
+      "category": "semantic_context",
+      "allowed_for_filtering": true,
+      "validation": {"non_empty": true}
+    },
+    "main_objection": {
+      "source_column": "main_objection",
+      "required": true,
+      "type": "string",
+      "destination": "both",
+      "category": "semantic_context",
+      "allowed_for_filtering": true,
+      "validation": {"enum": ["price", "timing", "trust", "competitor", "no_need", "authority", "integration", "security", "other", "none"]}
+    },
+    "customer_intent": {
+      "source_column": "customer_intent",
+      "required": true,
+      "type": "string",
+      "destination": "both",
+      "category": "semantic_context",
+      "allowed_for_filtering": true,
+      "validation": {"enum": ["high", "medium", "low", "unclear"]}
+    },
+    "customer_sentiment": {
+      "source_column": "customer_sentiment",
+      "required": true,
+      "type": "string",
+      "destination": "both",
+      "category": "semantic_context",
+      "allowed_for_filtering": true,
+      "validation": {"enum": ["positive", "neutral", "negative", "mixed"]}
+    },
+
+    "sale_result": {
+      "source_column": "sale_result",
+      "required": true,
+      "type": "string",
+      "destination": "metadata",
+      "category": "outcome_strategy",
+      "allowed_for_filtering": true,
+      "validation": {"enum": ["Sale", "No Sale", "Follow-up Needed"]}
+    },
+    "call_category": {
+      "source_column": "call_category",
+      "required": true,
+      "type": "string",
+      "destination": "metadata",
+      "category": "outcome_strategy",
+      "allowed_for_filtering": true,
+      "validation": {"enum": ["Successful Sale", "Failed Sale", "Follow-up Needed", "High-Value Opportunity", "Coaching Required", "Human Review Required"]}
+    },
+    "closing_attempt": {
+      "source_column": "closing_attempt",
+      "required": true,
+      "type": "string",
+      "destination": "metadata",
+      "category": "outcome_strategy",
+      "allowed_for_filtering": true,
+      "validation": {"enum": ["strong", "medium", "weak", "none"]}
+    },
+    "follow_up_needed": {
+      "source_column": "follow_up_needed",
+      "required": true,
+      "type": "boolean",
+      "destination": "metadata",
+      "category": "outcome_strategy",
+      "allowed_for_filtering": true,
+      "validation": {}
+    },
+    "next_meeting_scheduled": {
+      "source_column": "next_meeting_scheduled",
+      "required": true,
+      "type": "boolean",
+      "destination": "metadata",
+      "category": "outcome_strategy",
+      "allowed_for_filtering": true,
+      "validation": {}
+    },
+    "decision_maker_present": {
+      "source_column": "decision_maker_present",
+      "required": true,
+      "type": "boolean",
+      "destination": "metadata",
+      "category": "outcome_strategy",
+      "allowed_for_filtering": true,
+      "validation": {}
+    },
+
+    "call_duration_seconds": {
+      "source_column": "call_duration_seconds",
+      "required": true,
+      "type": "integer",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"min": 180, "max": 900}
+    },
+    "agent_performance_score": {
+      "source_column": "agent_performance_score",
+      "required": true,
+      "type": "integer",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"min": 1, "max": 5}
+    },
+    "objection_handling_quality": {
+      "source_column": "objection_handling_quality",
+      "required": true,
+      "type": "integer",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"min": 1, "max": 5}
+    },
+    "lead_quality_score": {
+      "source_column": "lead_quality_score",
+      "required": true,
+      "type": "integer",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"min": 1, "max": 5}
+    },
+    "silence_ratio": {
+      "source_column": "silence_ratio",
+      "required": true,
+      "type": "number",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"min": 0.05, "max": 0.35}
+    },
+    "speaking_rate_wpm": {
+      "source_column": "speaking_rate_wpm",
+      "required": true,
+      "type": "number",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"min": 100, "max": 190}
+    },
+    "speech_to_non_speech_ratio": {
+      "source_column": "speech_to_non_speech_ratio",
+      "required": true,
+      "type": "number",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"min": 0.65, "max": 0.95}
+    },
+    "agent_talk_ratio": {
+      "source_column": "agent_talk_ratio",
+      "required": true,
+      "type": "number",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"min": 0.35, "max": 0.75}
+    },
+    "average_energy_level": {
+      "source_column": "average_energy_level",
+      "required": true,
+      "type": "string",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"enum": ["low", "medium", "high"]}
+    },
+    "price_mentions_count": {
+      "source_column": "price_mentions_count",
+      "required": true,
+      "type": "integer",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"min": 0}
+    },
+    "competitor_mentions_count": {
+      "source_column": "competitor_mentions_count",
+      "required": true,
+      "type": "integer",
+      "destination": "metadata",
+      "category": "analytical_evidence",
+      "allowed_for_filtering": false,
+      "validation": {"min": 0}
+    },
+
+    "transcript": {
+      "source_column": "transcript",
+      "required": true,
+      "type": "string",
+      "destination": "txt",
+      "category": "content",
+      "allowed_for_filtering": false,
+      "validation": {"non_empty": true},
+      "notes": "Copied verbatim. Never stored in metadata (explicit constraint) — metadata sidecars must not carry the full transcript."
+    },
+    "manager_notes": {
+      "source_column": "manager_notes",
+      "required": true,
+      "type": "string",
+      "destination": "txt",
+      "category": "content",
+      "allowed_for_filtering": false,
+      "validation": {"non_empty": true},
+      "notes": "Copied verbatim under the 'Manager Review — Secondary Evidence' label. Never stored in metadata."
+    }
+  },
+
+  "filter_allowlist_notes": "The 'allowed_for_filtering' flags above are the field-level input to the future deterministic filter builder (not implemented in this task — see README's Small-Corpus Filter Policy). semantic_context and outcome_strategy fields are eligible; identity fields (call_id, agent_name) and analytical_evidence fields are excluded from the default allowlist, analytical_evidence explicitly per this task's instructions (returned to LangGraph as evidence, not used as a default retrieval filter on the current 24-call corpus)."
+}

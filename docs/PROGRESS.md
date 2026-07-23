@@ -18,10 +18,10 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 | 6 | FastAPI mock service skeletons | Complete |
 | 7 | Docker Compose for local backend services | Complete (done as part of Phase 6) |
 | 8 | curl/Postman testing documentation | Complete (done as part of Phase 6) |
-| 9 | Transcription API decision + mock n8n webhook flow | In progress (transcription API decided; webhook-flow Iteration 1 complete — intake through AssemblyAI job acceptance) |
+| 9 | Transcription API decision + mock n8n webhook flow | In progress (transcription API decided; Iteration 1 mock flow complete; Iteration 2a — real AssemblyAI transcription end-to-end — complete and verified live; Iteration 2b — real spoken-audio validation — not yet run) |
 | 10 | Connect n8n to mock FastAPI services (ngrok or local n8n) | Not started |
 | 11 | Implement NeMo Guardrails service | Not started |
-| 12 | Implement RAG service | Not started |
+| 12 | Implement RAG service | In progress — Bedrock ingestion pipeline built (`services/rag_service/ingestion/`); FastAPI `/query` wrapper itself not yet built |
 | 13 | Implement PyTorch call signal analyser | Not started |
 | 14 | Implement LangGraph agent | Not started |
 | 15 | Test full backend and n8n flow end-to-end without frontend | Not started |
@@ -35,6 +35,7 @@ Tracks completed phases and open decisions. Updated at the end of every phase.
 
 - **Transcription API:** Decided — AssemblyAI (Phase 9, Iteration 1). See [docs/technology_decisions.md](technology_decisions.md) for the full rationale.
 - **n8n local development approach:** ngrok vs. Cloudflare Tunnel vs. local n8n in Docker Compose. Still open — to be decided in a later Phase 9 iteration.
+- **RAG retrieval backend:** Decided — Amazon Bedrock Knowledge Base (`Retrieve` API + deterministic template, not `RetrieveAndGenerate`), replacing the originally planned LangChain + ChromaDB + HuggingFace + Llama.cpp stack. Applied to `CLAUDE.md` (items 6 and 10, Component 3, the Mermaid diagram, Component 7's data description). `docs/architecture.md`, `docs/technology_decisions.md`, and `docs/dataset_design.md` still describe the old ChromaDB stack and have not yet been updated to match — flagged here as a follow-up, not done silently. **Still open:** actual AWS Bedrock Knowledge Base provisioning (bucket, KB resource, embedding model choice) is out of scope for the ingestion-pipeline work done so far and needs its own decision/setup pass before Phase 12's FastAPI wrapper can be built and tested end-to-end.
 
 ## Phase log
 
@@ -214,3 +215,25 @@ Applied consistently:
 - `docs/PROGRESS.md`: resolved the "Transcription API" open decision; the "n8n local development approach" (ngrok vs. Cloudflare Tunnel vs. local n8n) open decision remains for a later Phase 9 iteration.
 
 **Deferred to later Phase 9 iterations (not started):** the mock n8n webhook flow itself, AssemblyAI API integration/credentials, and the n8n local-development-connectivity decision.
+
+### Phase 9, Iteration 2a — Real AssemblyAI transcription end-to-end (complete)
+
+Built out the live n8n workflow `RBII7JvRDFWwy98x` ("XSight - Phase 9 Iteration 2a - Audio Intake and Transcription") through a formal milestone process: binary audio intake → guardrails check → AssemblyAI upload/submit → 3s-interval polling (120s cap) → transcript normalization (speaker-tagged `utterances`, `full_text`, `confidence`, `status`) → unified success/error responses. Simplified along the way (consolidated 3 IF nodes into a Switch, removed 4 unused Tag nodes and the Mock Transcription node) and hardened error classification to be payload-content-based (checking for `transcript_id`/`upload_url`/`checks` presence) rather than `$prevNode.name` or `.isExecuted`, since the latter throws instead of returning `false` for unexecuted nodes.
+
+Built the first real (non-mock) implementation of `services/guardrails_service` (deterministic `POST /check/input` pre-transcription checks only — file/MIME/size/metadata/prompt-injection; NeMo Guardrails and post-transcription checks remain future work), with a `size_bytes`/`file_size` backward-compatible alias so the already-built n8n payload works without modification. Deployed to a real AWS EC2 instance; the live workflow's Guardrails HTTP node now points at it.
+
+**Debugged live against real services** (n8n execution logs cross-checked against curl, since n8n Cloud's test-webhook delivery is unreliable — 502s and empty bodies even on server-side successes): fixed a Set-node `jsonOutput` expression-vs-object bug, a `$binary.audio_file.fileSize`-is-a-formatted-string bug (needed `.bytes` instead), an IF-node strict-boolean `rightValue` bug, and — most notably — a crash in `Build Error Response` (`Cannot convert undefined or null to object`) traced to `JSON.stringify()` on a circular/rich AxiosError object; fixed by normalizing the error to a string exactly once at the top of the node (`typeof` checks, no `JSON.stringify`), which was verified fixed against the exact AxiosError shape that caused the original crash.
+
+**Result: full pipeline success confirmed live**, HTTP 200 end-to-end (Guardrails pass → AssemblyAI upload/submit/poll → `status: "completed"` → `Build Success Response`), after also fixing the actual AssemblyAI credential's auth header configuration (user-side, in the n8n UI). Verified with a synthetic 3-second WAV (440 Hz tone) — transcript text and confidence were correctly empty/zero since there was no actual speech to transcribe, not a pipeline defect.
+
+### Phase 9, Iteration 2b — Real spoken-audio validation (not started)
+
+Reviewed `Submit Transcription Job`, `Poll AssemblyAI Transcript Status`, `Normalize Transcript`, and `Build Success Response` against the live workflow: speaker diarization (`speaker_labels: true`) was already enabled in Iteration 2a's `Submit Transcription Job` payload, and `Normalize Transcript` already extracts speaker-tagged `utterances`. No workflow change was needed. Still waiting on a real spoken sales-call audio file to actually exercise diarization/transcription against real speech (the Iteration 2a test used a synthetic tone, which produced no transcribable content).
+
+### Bedrock Knowledge Base ingestion pipeline (RAG data-prep, ahead of Phase 12)
+
+The user requested preparing `data/historical_sales_calls.csv` for Amazon Bedrock Knowledge Base ingestion, describing Bedrock KB as the project's "existing" retrieval layer — which conflicted directly with `CLAUDE.md`'s documented RAG stack (LangChain + ChromaDB + HuggingFace + Llama.cpp) and its explicit statement that Bedrock KB was old-project technology this rebuild intentionally moved away from. Flagged the conflict per `CLAUDE.md`'s "ask instead of invent" rule rather than either silently building ChromaDB tooling or silently building Bedrock tooling; the user confirmed this is a deliberate architecture change. See the "RAG retrieval backend" open-decision entry above for what was decided (Bedrock `Retrieve` + deterministic template, not `RetrieveAndGenerate`) and updated in `CLAUDE.md`.
+
+Built `services/rag_service/ingestion/`: `convert_csv_to_documents.py` (CSV → one `.txt` + one `.txt.metadata.json` per call, matching Bedrock's S3 metadata-sidecar convention), `validate_documents.py` (independent re-check against the CSV — verbatim-transcript check, metadata type/completeness check, orphan/missing-file check), `document_schema.md` (content/metadata format and the reasoning behind the split, plus the `NONE`-chunking recommendation), and `README.md` (folder layout, S3 upload command, metadata filter strategy, retrieval strategy, and an integration diagram showing the RAG Service's `POST /query` contract is unchanged by the backend swap). Both scripts are dependency-free (stdlib only). Actually run against the real corpus: **24/24 calls converted, 0 errors, 0 warnings** on validation. Generated output lives in `services/rag_service/ingestion/output/` and is gitignored (regenerable from the CSV, not a second source of truth).
+
+**Not done in this pass, flagged rather than assumed:** `docs/architecture.md`, `docs/technology_decisions.md`, and `docs/dataset_design.md` still describe the ChromaDB-based RAG stack and were not updated — only `CLAUDE.md` (the source of truth per its own header) was brought current. Actual AWS Bedrock Knowledge Base provisioning (S3 bucket, KB resource, embedding model selection) and the FastAPI `/query` wrapper itself remain unbuilt — this phase covered data preparation only, per explicit instruction not to build the service yet.

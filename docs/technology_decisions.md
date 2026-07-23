@@ -6,10 +6,10 @@ This document records the rationale behind each technology choice in the XSight 
 
 A few constraints shaped every decision below:
 
-- **Backend-first, local-service development.** FastAPI services, Docker containers, ChromaDB, local models, and service endpoints are developed and tested locally first, using curl and Postman, before any frontend integration exists. n8n Cloud is introduced once webhook orchestration begins (Phase 9–10) — n8n itself is a cloud service from the start, so "local-first" describes the services being orchestrated, not the orchestrator. The React frontend is intentionally deferred until the backend and n8n workflow are stable (Phase 16+), and AWS EC2 deployment happens only after local service validation (Phase 19).
+- **Backend-first, local-service development.** FastAPI services, Docker containers, local models, and service endpoints are developed and tested locally first, using curl and Postman, before any frontend integration exists. n8n Cloud is introduced once webhook orchestration begins (Phase 9–10) — n8n itself is a cloud service from the start, so "local-first" describes the services being orchestrated, not the orchestrator. The React frontend is intentionally deferred until the backend and n8n workflow are stable (Phase 16+), and AWS EC2 deployment happens only after local service validation (Phase 19). One exception, introduced at Phase 5C: the RAG service depends on Amazon Bedrock Knowledge Base, an AWS-managed service with no local/offline mode — see "RAG — Amazon Bedrock Knowledge Base" below.
 - **Grounded, non-hallucinated output.** XSight makes claims about historical sales calls and gives coaching advice; the stack had to support retrieval-grounded generation with citations and explicit guardrails, not open-ended generation.
 - **Breadth of AI engineering techniques.** As a final project, the stack is deliberately composed of distinct, complementary techniques (RAG, a trained classifier, an agentic graph, guardrails, orchestration) rather than one monolithic LLM call — each component should be independently demonstrable and testable.
-- **Two clearly separated local LLM runtimes.** The project intentionally uses both Llama.cpp and Ollama for different purposes (see below), to keep the RAG generation path and the interactive assistant path architecturally independent.
+- **Local LLM runtime kept independent from the analysis pipeline.** The project originally used two separate local LLM runtimes (Llama.cpp inside the RAG service, Ollama for the sidebar assistant) specifically so the two paths stayed architecturally independent. Since the Phase 5C switch to Amazon Bedrock Knowledge Base, the RAG service no longer runs a local LLM at all, so Ollama is now the only one — the underlying goal (keep the assistant isolated from the analysis pipeline) still holds; see "Local Assistant — Ollama" below.
 - **n8n is the single central orchestrator.** Every AI call in the pipeline — guardrails, transcription, the Gemini extractor, the RAG Service, the Call Signal Analyser, the LangGraph agent, and the Gemini Final Analysis Chain — is invoked directly by n8n; no AI component calls another AI component. Gemini is scoped to two narrow roles (extraction, then final synthesis) and LangGraph is scoped to reasoning over evidence n8n already fetched, not to invoking that evidence-gathering itself. See "Orchestration — n8n Cloud" and "Agent — LangGraph" below for the full rationale.
 
 ---
@@ -85,17 +85,21 @@ The Guardrails service exposes a single `POST /check/input` endpoint that is inv
 
 **Trade-off accepted:** An additional service and runtime to maintain, plus the extra complexity of stage-aware input validation instead of one flat check; accepted because guardrails-as-a-separate-service is a deliberate architectural requirement, and because pretending file-level and content-level validation are the same step would mean either skipping file checks (unsafe) or requiring a transcript that doesn't exist yet (impossible).
 
-## RAG — LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp
+## RAG — Amazon Bedrock Knowledge Base (Retrieve API only)
 
-**Alternatives considered:** LlamaIndex instead of LangChain; Pinecone/Weaviate instead of ChromaDB; OpenAI embeddings instead of HuggingFace; calling Gemini instead of a local Llama.cpp model for RAG generation.
+**Decision:** Amazon Bedrock Knowledge Base, with Amazon S3 as its data source and Amazon Titan Text Embeddings V2 as the embedding model. The RAG service queries it through the `Retrieve` API only — `RetrieveAndGenerate` is deliberately not used. Decided at Phase 5C, superseding the originally planned LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp stack (see "Why the earlier plan was superseded" below).
+
+**Alternatives considered:** Continuing with the original LangChain + ChromaDB + HuggingFace + Llama.cpp plan; Bedrock's `RetrieveAndGenerate` API instead of `Retrieve` only; Pinecone or Weaviate as a standalone managed vector store instead of Bedrock Knowledge Base; OpenAI embeddings instead of Titan Text Embeddings V2.
 
 **Why chosen:**
-- **LangChain** has mature retriever/chain abstractions and is the most widely documented option for wiring a retriever to a citation-constrained generation step.
-- **ChromaDB** is embedded, file-based, and requires no external service or account — appropriate for backend-first local development and for a dataset of only 20–30 detailed historical calls.
-- **HuggingFace embeddings (`sentence-transformers/all-MiniLM-L6-v2`)** run locally, are free, and are small/fast enough for the dataset size, avoiding an external embeddings API dependency and its cost/rate limits.
-- **Llama.cpp** provides local, offline generation for the RAG service specifically, keeping the RAG service self-contained and independent of both the n8n/Gemini path and the Ollama assistant path — important since the RAG output must be strictly grounded and citation-checked, which is easier to control with a dedicated local model and explicit prompt constraints than through an external API shared with other orchestration prompts.
+- **Amazon Bedrock Knowledge Base** removes the need to self-host a vector database, an embedding model, and a local generation model — Bedrock owns embedding, indexing, and retrieval end-to-end, which reduces the RAG service to a thin FastAPI wrapper around a single API call.
+- **Amazon S3** as the data source is a natural fit for a small, static, per-call document corpus (24 documents today) — no database server, and it's the same storage layer the project's AWS deployment already uses.
+- **Amazon Titan Text Embeddings V2** is Bedrock's own embedding model, avoiding a separate embeddings account/API and keeping the entire retrieval path inside one AWS service boundary.
+- **`Retrieve` only, not `RetrieveAndGenerate`:** the project's Ground Truth Rules require every claim about a historical call to cite its `call_id`, with no invented CRM facts. `Retrieve` returns raw matched documents, metadata, and scores with no generation step in between — the RAG service builds `similar_calls` / `insight` / `citations` from that response using deterministic template logic. `RetrieveAndGenerate` would introduce an additional LLM call with its own hallucination risk, which is unnecessary risk for a corpus small enough that deterministic formatting is sufficient.
 
-**Trade-off accepted:** Running a local GGUF model via Llama.cpp adds setup complexity (model download, `models/` artifact management, hardware dependency) compared to just calling an external API; accepted because it keeps RAG generation fully local and demonstrates local LLM inference as a distinct skill.
+**Why the earlier plan was superseded:** the original LangChain + ChromaDB + HuggingFace + Llama.cpp stack was fully self-hosted and never actually implemented — no dependency was ever added to `services/rag_service/requirements.txt`, no ChromaDB data was ever created. The project's data-preparation pipeline (`services/rag_service/ingestion/`) was rebuilt for Bedrock's S3 + metadata-sidecar ingestion format instead, and is fully implemented and validated ahead of the FastAPI wrapper itself.
+
+**Trade-off accepted:** The RAG service now depends on a real AWS account, provisioned Bedrock/S3 resources, and network access to AWS even during local development — unlike the fully self-hosted ChromaDB plan, there is no local/offline mode for Bedrock Knowledge Base. Accepted because it removes local model management (no GGUF download, no embedding model download, no vector store operational burden) in exchange for one AWS dependency, and because AWS Bedrock is directly relevant to the project's planned AWS EC2 deployment target.
 
 ## Voice / Call Signal Analyser — PyTorch, transcript + structured + lightweight audio features
 
@@ -125,13 +129,13 @@ Including real audio-derived features (rather than treating the analyser as tran
 
 **Trade-off accepted:** An extra network hop and an extra service to maintain, compared to folding this reasoning directly into the Final Analysis Chain's prompt; accepted because a dedicated reasoning stage with structured, inspectable output (`reasoning_steps`, `evidence_conflicts`) is more debuggable and more demoable than reasoning buried inside one large synthesis prompt, and because it's a specific technique (LangGraph) the project is meant to demonstrate independently. **Open decision:** which LLM backs the Planner and Synthesizer nodes (Gemini via API, or a separate/local model) is not yet chosen — deferred to Phase 14.
 
-## Local Assistant — Ollama (separate from Llama.cpp)
+## Local Assistant — Ollama
 
-**Alternatives considered:** Reusing the same Llama.cpp runtime for both RAG generation and the sidebar assistant; calling Gemini for the assistant instead of a local model.
+**Alternatives considered:** Reusing the RAG service's local generation runtime for both RAG generation and the sidebar assistant (relevant when the RAG service was planned around a local Llama.cpp model; no longer applicable since the Phase 5C switch to Bedrock — see the RAG decision above); calling Gemini for the assistant instead of a local model.
 
-**Final distinction:** Llama.cpp is used *only* inside the RAG service, for grounded, citation-constrained generation over retrieved historical calls. Ollama is used *only* for the separate conversational sales assistant in the React application. Neither runtime serves both purposes.
+**Final distinction:** Ollama is used *only* for the separate conversational sales assistant in the React application. Since the RAG service switched to Amazon Bedrock Knowledge Base, it no longer runs any local LLM at all, so Ollama is now the project's only local LLM runtime — the original isolation rationale below (why the assistant should stay independent from the RAG service) still applies, even though there is no longer a second local runtime to isolate it from.
 
-**Why chosen:** Ollama is optimized for interactive, conversational local inference with simple model management (`ollama pull`, `ollama run`) and a stable local HTTP API, which fits a chat-style sidebar assistant well. Keeping it as a service fully separate from Llama.cpp gives:
+**Why chosen:** Ollama is optimized for interactive, conversational local inference with simple model management (`ollama pull`, `ollama run`) and a stable local HTTP API, which fits a chat-style sidebar assistant well. Keeping it as a service fully separate from the RAG service gives:
 - **Prompt isolation** — the assistant's conversational system prompt and the RAG service's strict citation/grounding instructions never live in the same context or risk being concatenated.
 - **State isolation** — the assistant can hold multi-turn conversation state; the RAG service stays stateless per query.
 - **Independent testing** — each service can be evaluated against its own benchmark (grounding/citation accuracy for RAG, helpfulness/tone for the assistant) without the other's behavior as a confound.
@@ -139,15 +143,15 @@ Including real audio-derived features (rather than treating the analyser as tran
 - **Separate resource control** — each runtime can be sized, started, and monitored independently.
 - **Clearer failure boundaries** — if one runtime crashes or is misconfigured, it does not take down the other.
 
-Running them as separate services makes these properties structural rather than incidental — but the separation itself is an enabler for isolation, not a guarantee of it. Prompt or behavior leakage is ultimately prevented by keeping the prompts, validation rules, and code paths of the two services separate, not by the process boundary alone; if the same prompts or validation logic were shared or copy-pasted between the two services, running them as separate runtimes would not by itself stop behavior from one leaking into the other.
+Running Ollama as its own service (rather than folding the assistant into another component) makes these properties structural rather than incidental — the separation itself is an enabler for isolation, not a guarantee of it. Prompt or behavior leakage would ultimately depend on keeping the assistant's prompts and validation logic out of any other service's code path, not on the process boundary alone.
 
-**Trade-off accepted:** Two local LLM runtimes to install and run instead of one; accepted deliberately per the architectural requirement that these stay independent.
+**Trade-off accepted:** A separate local runtime to install and run, on top of the FastAPI services; accepted deliberately to keep the sidebar assistant's conversational surface independent from the rest of the pipeline. This trade-off predates the Phase 5C RAG decision (when it meant weighing Ollama against a second local runtime, Llama.cpp); it still holds now that Ollama is the only local LLM runtime in the project, since the isolation is about keeping the assistant separate from the analysis pipeline generally, not specifically from another local model.
 
-## Data — CSV + ChromaDB
+## Data — CSV + S3 + Amazon Bedrock Knowledge Base
 
 **Alternatives considered:** A relational database (SQLite/Postgres) for the historical calls dataset.
 
-**Why chosen:** A CSV is sufficient for a static, project-scale historical dataset, is trivial to version, inspect, and edit by hand, and loads directly into both the PyTorch training pipeline (via pandas) and the ChromaDB ingestion step for RAG — no database server needed for a dataset this size.
+**Why chosen:** A CSV is sufficient for a static, project-scale historical dataset, is trivial to version, inspect, and edit by hand, and loads directly into the PyTorch training pipeline (via pandas). For RAG retrieval, `data/historical_sales_calls.csv` is the canonical source that `services/rag_service/ingestion/` converts into per-call documents uploaded to Amazon S3, which the Bedrock Knowledge Base indexes — no database server needed for a dataset this size, and no local vector store to manage.
 
 **Trade-off accepted:** No concurrent-write support or query language; acceptable since the dataset is read-only at runtime and only regenerated offline.
 
@@ -155,7 +159,7 @@ Running them as separate services makes these properties structural rather than 
 
 The RAG corpus and the classifier training dataset serve different purposes and are deliberately kept as two separate CSV files — not one file reused for both, and not one file with two conceptually-separate-but-physically-identical halves. The project does not contain 150–300 complete transcripts.
 
-- **`data/historical_sales_calls.csv`** — the RAG corpus: at least 20 detailed historical sales call transcripts (up to 30), each with rich metadata. Used for ChromaDB retrieval and citation-based generation — retrieval quality depends on having real, varied, well-written transcripts, not volume.
+- **`data/historical_sales_calls.csv`** — the RAG corpus: at least 20 detailed historical sales call transcripts (up to 30), each with rich metadata. Converted into per-call documents for Amazon Bedrock Knowledge Base retrieval — retrieval quality depends on having real, varied, well-written transcripts, not volume.
 - **`data/call_signal_training.csv`** — the classifier training dataset: a larger structured dataset for PyTorch training — approximately 150–300 synthetic or adapted feature rows (features and labels only, no full transcript) is acceptable. Rows are generated through controlled variations (systematically varied feature combinations and outcomes) rather than duplicated boilerplate, and labels must remain logically consistent with their features. The dataset is split into train/validation/test sets, with no duplicate-row leakage across splits — a row generated as a variation of another must not appear in more than one split.
 
 The two files share a compatible column schema (`call_signal_training.csv` omits `transcript`), so feature-engineering and validation logic can be reused across both, but they are separate files with separate purposes: one is read (never written) at request time by the RAG service; the other is read only offline, during PyTorch training.
@@ -164,7 +168,7 @@ The two files share a compatible column schema (`call_signal_training.csv` omits
 
 **Alternatives considered:** Deploying directly to a managed platform (e.g. Render, Railway) or serverless functions per service.
 
-**Why chosen:** Docker Compose lets all four FastAPI services run together locally with consistent networking during Phases 7–15, matching how they will later run in production. EC2 was chosen over serverless because some services (RAG with Llama.cpp, the PyTorch model) benefit from a persistent process and loaded-in-memory models rather than cold-start-per-request billing, and because a single EC2 instance running the same Compose setup used locally minimizes the gap between the local and deployed environments.
+**Why chosen:** Docker Compose lets all four FastAPI services run together locally with consistent networking during Phases 7–15, matching how they will later run in production. EC2 was chosen over serverless because the Call Signal Analyser's PyTorch model benefits from a persistent process and a loaded-in-memory model rather than cold-start-per-request billing, and because a single EC2 instance running the same Compose setup used locally minimizes the gap between the local and deployed environments. (The RAG service no longer needs this justification on its own — since the Phase 5C switch to Amazon Bedrock Knowledge Base, it makes a remote API call rather than running a local model — but the PyTorch model alone is enough reason to keep EC2 over serverless.)
 
 **Trade-off accepted:** More manual ops work than a managed platform (no auto-scaling, manual instance management); acceptable given the project's fixed, demo-oriented scope rather than production traffic.
 
@@ -176,12 +180,12 @@ The two files share a compatible column schema (`call_signal_training.csv` omits
 |---|---|---|---|
 | Frontend | React | Streamlit, Vue | Full control over structured results UI |
 | Orchestration | n8n Cloud — central orchestrator, calls every AI component directly | Custom FastAPI orchestration, Airflow, LangGraph as orchestrator | Visual, inspectable, demo-friendly workflow; every AI call visible as its own node |
-| Transcription | TBD (Phase 9) | — | Decision deferred pending accuracy/diarization/cost evaluation |
+| Transcription | AssemblyAI (Phase 9, Iteration 1) | Deepgram, OpenAI Whisper API, Google Cloud Speech-to-Text | Built-in speaker diarization (needed for `Agent:`/`Customer:` tagging), native n8n webhook support |
 | n8n LLM | Gemini — two roles: Information Extractor, Final Analysis LLM Chain | GPT, Claude | Low-cost iteration, native n8n integration, narrow scope per role |
 | Guardrails | NeMo Guardrails + FastAPI + deterministic rules | Guardrails AI, prompt-only self-checking | NeMo for semantic/LLM checks, deterministic rules for fixed checks, staged around transcription |
-| RAG | LangChain + ChromaDB + HuggingFace + Llama.cpp | LlamaIndex, Pinecone, OpenAI embeddings | Self-contained, free, grounded generation; called by n8n directly (parallel with Call Signal Analyser) |
+| RAG | Amazon Bedrock Knowledge Base (`Retrieve` only) + S3 + Titan Text Embeddings V2 | LangChain + ChromaDB + Llama.cpp (superseded, Phase 5C), `RetrieveAndGenerate`, Pinecone/Weaviate | No self-hosted vector store or local model to manage; deterministic, citation-grounded formatting with no extra LLM call; called by n8n directly (parallel with Call Signal Analyser) |
 | Call signal analysis | PyTorch (transcript + structured + lightweight audio features) | scikit-learn, full librosa acoustic pipeline, transcript-only heuristics | Trained feature-based classifier combining real (not fabricated) signals from text and audio; called by n8n directly, own audio preprocessing |
 | Agent | LangGraph — multi-step reasoning over pre-fetched evidence | Reasoning folded into the Final Analysis prompt, LangGraph as orchestrator, LangChain AgentExecutor | Explicit, inspectable reasoning graph, structured `reasoning_steps`/`evidence_conflicts`; does not call other services itself |
-| Local assistant | Ollama | Reuse Llama.cpp, call Gemini | Simple conversational runtime, kept independent from RAG generation |
-| Data | Two CSV files (RAG corpus + classifier training) + ChromaDB | SQLite/Postgres, one shared CSV file | Sufficient for dataset size, trivial to version and inspect; purposes kept separate |
+| Local assistant | Ollama (the project's only local LLM runtime since the Phase 5C RAG decision) | Reuse the RAG service's local model, call Gemini | Simple conversational runtime, kept independent from the analysis pipeline |
+| Data | Two CSV files (RAG corpus + classifier training) + S3 + Amazon Bedrock Knowledge Base | SQLite/Postgres, one shared CSV file | Sufficient for dataset size, trivial to version and inspect; purposes kept separate |
 | Deployment | Docker → AWS EC2 | Managed PaaS, serverless | Persistent processes for loaded models, local/prod parity |

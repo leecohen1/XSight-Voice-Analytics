@@ -10,7 +10,7 @@ Full project specification for Claude Code sessions. This file is the source of 
 - If anything in this spec is ambiguous or contradictory, ASK the user instead of inventing a solution.
 - Maintain `docs/PROGRESS.md` tracking completed phases and open decisions.
 - Each Python service gets its own `requirements.txt` and a `.env.example` file. Use Python 3.11+.
-- Never commit secrets, model weights, ChromaDB data, or audio files (ensure `.gitignore` covers them).
+- Never commit secrets, model weights, or audio files (ensure `.gitignore` covers them).
 - Explain all work to the user in Hebrew. All code, comments, and documentation must be in English.
 
 **Important:** This is a completely new version of XSight. It is NOT the old XSight project. The old project used Flask, Amazon Bedrock Agent, Bedrock Knowledge Base, S3, metadata CSV files and Action Groups. This new project is rebuilt from zero with a new architecture and different technologies.
@@ -211,11 +211,11 @@ When generating future transcripts, treat every conversation as an independent w
 3. **Transcription:** AssemblyAI — decided at Phase 9 (Iteration 1). Chosen primarily for built-in speaker diarization, which the pipeline depends on for `Agent:`/`Customer:` transcript tagging (used by the post-transcription Guardrails check, the Call Signal Analyser's `agent_talk_ratio`, and RAG grounding), plus native webhook support for clean n8n integration. See [docs/technology_decisions.md](docs/technology_decisions.md) for the full rationale and alternatives considered.
 4. **Gemini (via n8n):** used in two distinct roles, both orchestrated by n8n — never calls other services itself. (a) **Information Extractor:** structured semantic extraction only from the validated transcript (customer intent, main objection, customer sentiment, closing attempt, key sales events, relevant call metadata). (b) **Final Analysis LLM Chain:** combines the structured extraction, the RAG Service's results, the Call Signal Analyser's results, and the LangGraph agent's reasoning output into the complete final output JSON. Neither role generates coaching feedback or a final analysis on its own — extraction only extracts, and the Final Analysis Chain only synthesizes what n8n hands it.
 5. **Guardrails:** NeMo Guardrails + FastAPI + deterministic custom validation rules. NeMo Guardrails handles topic restrictions, unsafe content, prompt injection, jailbreak attempts, and other LLM-oriented input/output policies. Deterministic rules handle checks such as empty input, transcript length, missing citations, invalid schemas, unsupported file formats, and required fields. Input validation runs in two stages — pre-transcription file validation and post-transcription content guardrails — see Architecture flow.
-6. **RAG:** LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp. Embedding model: `sentence-transformers/all-MiniLM-L6-v2`. Retrieval of grounded historical-call evidence only — called directly by n8n (in parallel with the Call Signal Analyser), not by LangGraph.
+6. **RAG:** Amazon Bedrock Knowledge Base (managed retrieval over S3-hosted documents) + a thin FastAPI wrapper service. Decided at Phase 5C, replacing the originally planned LangChain + ChromaDB + HuggingFace + Llama.cpp stack — see [docs/technology_decisions.md](docs/technology_decisions.md) for the rationale. No self-hosted vector database, embedding model, or local LLM: Bedrock KB owns embedding, indexing, and retrieval end-to-end. The FastAPI wrapper calls Bedrock's `Retrieve` API (raw matched documents + metadata + scores, no generation) and builds `similar_calls`/`insight`/`citations` with deterministic template logic — no additional LLM call, so citation grounding cannot drift from what Bedrock actually returned. Retrieval of grounded historical-call evidence only — called directly by n8n (in parallel with the Call Signal Analyser), not by LangGraph. `services/rag_service`'s location, `POST /query` endpoint, and input/output contract (Component 3) are unchanged by this swap.
 7. **Voice / Call Signal Analysis:** PyTorch feature-based classifier over an engineered feature vector — not a raw-audio deep learning model. Prediction, scoring, and confidence estimation only — called directly by n8n (in parallel with the RAG Service), not by LangGraph. Performs its own lightweight audio preprocessing internally (no separate preprocessing service) — n8n forwards the audio file (or a reference to it) to this service, so it has direct file access to compute audio-derived features itself. Combines transcript-derived / structured-extraction features (word count, question count, price/competitor mention counts, customer intent, main objection, customer sentiment, closing attempt, speaker-tagged agent_talk_ratio when diarization is available — sourced from Gemini's extraction, not independently re-derived) with lightweight audio-derived features (call duration, silence ratio, speaking rate, speech-to-non-speech ratio, pause duration, interruptions, optional average pitch/energy level). Audio preprocessing is lightweight, not full acoustic/deep-learning feature extraction. Features that are unavailable must be marked missing/unknown rather than fabricated — e.g. `silence_ratio` must never be silently defaulted to 0.0.
 8. **Agent:** LangGraph — a multi-step reasoning layer, called directly by n8n after the parallel RAG Service and Call Signal Analyser calls have both returned and been merged. Receives the transcript, metadata, Gemini's structured extraction, the n8n AI Agent Node's intent classification/enrichment, the RAG results, and the Call Signal Analyser's results as input (it does not call those services itself), reasons over them (evidence-conflict detection, coaching points, recommended next action, reasoning steps), and returns that reasoning output — not the complete final report. The Gemini Final Analysis LLM Chain (not LangGraph) assembles the complete final output JSON. Exposed via FastAPI. LLM backend for the Planner/Synthesizer nodes: TBD — Phase 14.
-9. **Local Assistant:** Ollama — runs separately from Llama.cpp. Ollama serves the React sidebar assistant only. Llama.cpp runs inside the RAG service only. These are two separate runtimes and must not be merged.
-10. **Data:** CSV + ChromaDB. Two separate CSV files with related but distinct purposes — see Data Design (component 7).
+9. **Local Assistant:** Ollama — serves the React sidebar assistant only. Originally specified as "a separate runtime from Llama.cpp" to keep the RAG service's local generation and the sidebar assistant isolated; since Phase 5C's switch to Bedrock KB, the RAG service no longer runs any local LLM at all (Bedrock's `Retrieve` API + deterministic template — see item 6), so Ollama is now the only local LLM runtime in the project. Kept as its own service regardless, since the isolation rationale (separate prompts, separate validation rules, separate failure boundaries) still applies to keeping the sidebar assistant decoupled from the rest of the pipeline.
+10. **Data:** CSV + S3 + Amazon Bedrock Knowledge Base. Two separate CSV files with related but distinct purposes — see Data Design (component 7). `data/historical_sales_calls.csv` additionally serves as the source that gets converted into one S3 document per call for Bedrock Knowledge Base ingestion (see [services/rag_service/ingestion/README.md](services/rag_service/ingestion/README.md)); `data/call_signal_training.csv` is unaffected by this and remains PyTorch-training-only.
 11. **Deployment:** Docker locally first, then AWS EC2
 
 ---
@@ -287,7 +287,7 @@ flowchart LR
 
     F --> AA["n8n AI Agent Node\nIntent classification, field enrichment,\nservice relevance, payload prep\nlimited role — no reasoning, no final report"]
 
-    AA --> H["Sales Call RAG Service\nLangChain + ChromaDB + Llama.cpp"]
+    AA --> H["Sales Call RAG Service\nFastAPI + Bedrock Knowledge Base Retrieve"]
     AA --> I["Voice / Call Signal Analyser\nPyTorch — transcript + lightweight audio features"]
 
     H --> MG["Merge Results"]
@@ -307,14 +307,14 @@ flowchart LR
 
     subgraph DataModels["Data and Local AI Components"]
         N["historical_sales_calls.csv\nRAG corpus"]
-        O["ChromaDB Vector Store"]
-        P["Llama.cpp\nLocal RAG Generation\ninside RAG service"]
+        O["S3\nOne document per call"]
+        P["Amazon Bedrock Knowledge Base\nManaged embedding + retrieval"]
         Q["Ollama Assistant\nSidebar only — separate runtime"]
         T["call_signal_training.csv\nClassifier training data"]
     end
 
     N --> O
-    O --> H
+    O --> P
     P --> H
     Q --> B
     T -.->|offline training, Phase 13| I
@@ -394,11 +394,13 @@ Otherwise, the Router assigns the final `routing_category` and returns the resul
 ### 3. Sales Call RAG Service
 
 Location: `services/rag_service`
-Stack: FastAPI, LangChain, ChromaDB, HuggingFace embeddings, Llama.cpp
+Stack: FastAPI + boto3 (Amazon Bedrock Agent Runtime `Retrieve` API). Decided at Phase 5C — see item 6 of the technology stack above and [docs/technology_decisions.md](docs/technology_decisions.md).
+
+The historical-call corpus (`data/historical_sales_calls.csv`) is converted into one JSON document per call and uploaded to S3 (see [services/rag_service/ingestion/](services/rag_service/ingestion/) for the conversion script, document schema, and upload instructions); a pre-configured Bedrock Knowledge Base indexes that S3 bucket. The FastAPI service holds no local vector index — at query time it calls Bedrock's `Retrieve` API (KB ID via environment variable) to get back matched documents with their metadata and relevance scores, then builds `similar_calls`, `insight`, and `citations` from that response using deterministic template logic (no additional LLM call). This keeps every claim traceable to a specific retrieved `call_id`, consistent with the Ground Truth Rules.
 
 Called by: n8n, directly — in parallel with the Call Signal Analyser call, using the payload the n8n AI Agent Node prepared. Not called by the LangGraph agent.
 
-Endpoint: `POST /query`
+Endpoint: `POST /query` — input/output contract unchanged by the Bedrock switch (below).
 
 Input:
 ```json
@@ -633,7 +635,7 @@ Two separate CSV files, serving two distinct purposes — not one file serving b
 
 All content in English. The project does not contain 150–300 complete transcripts.
 
-**`data/historical_sales_calls.csv`** — the RAG corpus (used for ChromaDB retrieval and citation-based generation):
+**`data/historical_sales_calls.csv`** — the RAG corpus (converted into per-call S3 documents for Amazon Bedrock Knowledge Base retrieval and citation-based generation; see [services/rag_service/ingestion/](services/rag_service/ingestion/)):
 - at least 20 detailed historical sales call transcripts, up to 30
 - rich metadata per call
 - Columns: `call_id, agent_name, transcript, call_duration_seconds, sale_result, customer_intent, main_objection, customer_sentiment, agent_performance_score, objection_handling_quality, closing_attempt, follow_up_needed, lead_quality_score, call_category, silence_ratio, speaking_rate_wpm, agent_talk_ratio, price_mentions_count, competitor_mentions_count, risk_level, predicted_outcome_label`
@@ -661,7 +663,7 @@ Minimum 5 iterations per surface.
 1. n8n Information Extractor prompt (Gemini structured semantic extraction)
 2. n8n AI Agent Node prompt (intent classification and field enrichment — limited role, no reasoning or final output)
 3. n8n Final Analysis LLM Chain prompt (Gemini — combines extraction, enrichment, RAG results, signal analysis, and LangGraph's reasoning output into the complete final output JSON)
-4. LangChain RAG prompt (citation and grounding instructions)
+4. ~~LangChain RAG prompt (citation and grounding instructions)~~ — **not applicable since Phase 5C.** The RAG Service now calls Bedrock's `Retrieve` API and builds `insight`/`citations` with deterministic template logic (item 6 of the technology stack), not an LLM call, so there is no RAG-service prompt left to engineer. Kept as item 4 (rather than renumbered away) so the prompt-engineering log's "minimum 5 iterations per surface" scoring against the other 6 surfaces stays unambiguous about which surface was dropped and why.
 5. NeMo Guardrails rail prompts (input + output)
 6. Ollama Assistant system prompt
 7. LangGraph reasoning prompt (multi-step reasoning over pre-fetched RAG and Call Signal Analyser results)

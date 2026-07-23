@@ -1,6 +1,6 @@
 # XSight — Dataset Validation Report (Phase 5C)
 
-**Validation date:** 2026-07-15
+**Validation date:** 2026-07-23
 **Validated file:** `data/historical_sales_calls.csv`
 **Validation command:** `python scripts/validate_historical_dataset.py`
 **Final status: READY WITH WARNINGS**
@@ -160,9 +160,9 @@ None.
 
 ## Warnings
 
-- ⚠️ Batch 1 calls (['CALL_001', 'CALL_002', 'CALL_003', 'CALL_004']) contain banned template phrases — documented, pre-existing exception per CLAUDE.md's Transcript Writing Guidelines (guidelines apply 'starting from Batch 2 onward'; Batch 1 explicitly not rewritten retroactively).
-- ⚠️ Repeated opening pattern: 20/24 calls open the agent's first line with literal 'thanks for' — not a banned template, but a corpus-wide structural repetition worth noting.
-- ⚠️ Verbal tic 'honestly' appears 47 times across 21/24 calls — the most repeated filler word in the corpus.
+- Batch 1 calls (['CALL_001', 'CALL_002', 'CALL_003', 'CALL_004']) contain banned template phrases — documented, pre-existing exception per CLAUDE.md's Transcript Writing Guidelines (guidelines apply 'starting from Batch 2 onward'; Batch 1 explicitly not rewritten retroactively).
+- Repeated opening pattern: 20/24 calls open the agent's first line with literal 'thanks for' — not a banned template, but a corpus-wide structural repetition worth noting.
+- Verbal tic 'honestly' appears 47 times across 21/24 calls — the most repeated filler word in the corpus.
 
 ## Fixes applied
 

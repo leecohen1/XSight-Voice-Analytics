@@ -2,11 +2,20 @@
 
 XSight is a voice-based sales call analytics system. A sales manager or team leader uploads a recorded sales call audio file, and the system transcribes it, analyzes the sales conversation, extracts structured insights, compares the call to similar historical sales calls, predicts sales signals, and returns practical coaching and follow-up recommendations — all displayed in a web dashboard.
 
-This is a full rebuild of XSight from scratch, with a new architecture and a new technology stack. It is not related to any previous version of this project (the earlier version used Flask, Amazon Bedrock Agent, Bedrock Knowledge Base, S3, and Action Groups — none of that carries over).
+This is a full rebuild of XSight from scratch, with a new architecture and a new technology stack — no code, infrastructure, or design decisions carry over from any previous version of this project. The earlier version used Flask, an Amazon Bedrock Agent with Action Groups, Amazon Bedrock Knowledge Base, and S3.
+
+This new version also uses Amazon Bedrock Knowledge Base for retrieval (decided at Phase 5C, replacing an initially planned self-hosted LangChain + ChromaDB stack — see [docs/technology_decisions.md](docs/technology_decisions.md)), but the integration is not the same architecture: the earlier project used a Bedrock Agent with Action Groups to orchestrate tool calls around the Knowledge Base, while XSight calls the Knowledge Base directly through the `Retrieve` API only, from a plain FastAPI service that n8n — not a Bedrock Agent — orchestrates. Flask, Bedrock Agent, and Action Groups do not carry over.
 
 ## Status
 
-Under active development. Built incrementally in 20 phases, one at a time, with explicit approval required before moving to the next — see [docs/PROGRESS.md](docs/PROGRESS.md) for current progress and open decisions.
+Under active development, built incrementally in 20 phases with explicit approval required before moving to the next — see [docs/PROGRESS.md](docs/PROGRESS.md) for the full phase-by-phase status and open decisions. Current snapshot:
+
+- **Dataset** — `data/historical_sales_calls.csv` is complete and validated (24 calls, 0 errors; see [docs/dataset_validation_report.md](docs/dataset_validation_report.md)).
+- **n8n workflow** — audio intake through real AssemblyAI transcription is implemented and tested end-to-end against live services.
+- **Guardrails Service** — pre-transcription input validation is implemented and deployed; NeMo Guardrails and output validation are not yet built.
+- **RAG Service** — the Amazon Bedrock Knowledge Base data-preparation pipeline (CSV → S3-ready documents) is implemented and validated locally; no AWS resources are provisioned yet, and `POST /query` still returns a deterministic mock response.
+- **Call Signal Analyser and LangGraph agent** — Phase 6 mock skeletons only; real implementations are later phases.
+- **Frontend** — not started; planned for Phase 16 onward.
 
 ## Why XSight
 
@@ -74,14 +83,14 @@ See [CLAUDE.md](CLAUDE.md) for the full JSON schema.
 |---|---|
 | Frontend | React |
 | Orchestration | n8n Cloud |
-| Transcription | External API (TBD — Phase 9) |
+| Transcription | AssemblyAI |
 | LLM (via n8n) | Gemini — Information Extractor + Final Analysis LLM Chain |
 | Guardrails | NeMo Guardrails + FastAPI |
-| RAG | LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp |
+| RAG | Amazon Bedrock Knowledge Base (`Retrieve` API only) + S3 + Titan Text Embeddings V2 |
 | Call signal analysis | PyTorch (transcript + structured + lightweight audio features) |
 | Agent reasoning | LangGraph + FastAPI |
 | Local assistant | Ollama |
-| Data | Two CSV files (RAG corpus + classifier training) + ChromaDB |
+| Data | Two CSV files (RAG corpus + classifier training) + S3 + Amazon Bedrock Knowledge Base |
 | Deployment | Docker (local) → AWS EC2 |
 
 Rationale for these choices is documented in `docs/technology_decisions.md` (Phase 3).
@@ -90,7 +99,7 @@ Rationale for these choices is documented in `docs/technology_decisions.md` (Pha
 
 - **React web application** — upload form, results page, analytics dashboard, and an Ollama-powered assistant sidebar. Built last (Phase 16+).
 - **n8n Cloud workflow** — the central orchestrator. Calls every AI component directly: guardrails (both stages), transcription, Gemini extraction, a limited-role AI Agent Node (intent classification and field enrichment), the RAG Service and Call Signal Analyser (in parallel), the LangGraph agent, and a second Gemini call (Final Analysis LLM Chain) that assembles the complete result.
-- **Sales Call RAG Service** (`services/rag_service`) — retrieves similar historical calls from ChromaDB with cited, grounded insights. Called directly by n8n, in parallel with the Call Signal Analyser.
+- **Sales Call RAG Service** (`services/rag_service`) — retrieves similar historical calls from an Amazon Bedrock Knowledge Base with cited, grounded insights. Called directly by n8n, in parallel with the Call Signal Analyser.
 - **Voice / Call Signal Analyser** (`services/call_signal_analyser`) — PyTorch classifier producing outcome prediction, lead quality, agent performance, and risk scoring from transcript, structured-extraction, and lightweight audio-derived features (it preprocesses the audio file itself). Called directly by n8n, in parallel with the RAG Service.
 - **n8n AI Agent Node** — runs inside the n8n workflow, not a separate service. Limited role: classifies the submission intent, enriches the extracted fields, decides which downstream services are relevant, and prepares their request payloads — it does not reason over results or touch the final report.
 - **LangGraph Sales Agent** (`services/langgraph_agent`) — a multi-step reasoning layer, called by n8n after the RAG Service and Call Signal Analyser both return. Reasons over their results (evidence-conflict detection, coaching points, recommended action) but does not call other services and does not produce the final report — that's the Gemini Final Analysis Chain's job.
@@ -100,7 +109,7 @@ Full endpoint contracts, request/response schemas, and the architecture diagram 
 
 ## Architecture overview
 
-```
+```text
 User uploads audio → React → n8n Cloud → Pre-Transcription File Validation → Transcription
   → Post-Transcription Input Guardrails → Gemini Information Extractor (n8n)
   → n8n AI Agent Node (intent classification, field enrichment — limited role)
@@ -114,7 +123,7 @@ n8n is the central orchestrator and calls every AI component directly — the AI
 
 ## Repository structure
 
-```
+```text
 xsight-ai-sales-call-analytics/
 ├── CLAUDE.md                  ← full project specification
 ├── frontend/                  ← React web application (Phase 16+)
@@ -163,4 +172,32 @@ Full phase-by-phase breakdown and acceptance criteria are in [CLAUDE.md](CLAUDE.
 
 ## Getting started
 
-Setup instructions will be added as services are implemented (see relevant phase in [docs/PROGRESS.md](docs/PROGRESS.md)). Until Phase 16, there is no frontend — every service is exercised directly via curl, Postman, or n8n webhook calls.
+There is no frontend yet (Phase 16+); every service is exercised directly via curl, Postman, or n8n webhook calls. Full setup instructions will be added as each service reaches its real implementation phase — see [docs/PROGRESS.md](docs/PROGRESS.md). What already runs today:
+
+**Validate the historical dataset:**
+
+```bash
+python scripts/validate_historical_dataset.py
+```
+
+**Run the Bedrock Knowledge Base data-preparation pipeline** (converts the CSV into per-call documents and validates the result — see [services/rag_service/ingestion/README.md](services/rag_service/ingestion/README.md)):
+
+```bash
+python services/rag_service/ingestion/convert_csv_to_documents.py
+python services/rag_service/ingestion/validate_documents.py
+```
+
+**Run a backend service locally** (Phase 6 mock skeletons; each service under `services/` has its own `README.md`):
+
+```bash
+cd services/rag_service
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8001
+pytest -v
+```
+
+**Run all four backend services together:**
+
+```bash
+docker compose up
+```

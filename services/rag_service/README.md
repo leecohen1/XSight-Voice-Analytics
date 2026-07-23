@@ -2,16 +2,16 @@
 
 Sales Call RAG Service.
 
-**Status:** Phase 6 mock skeleton — API contract, validation, and error handling are real; retrieval is a deterministic mock. Full ChromaDB/LangChain implementation is Phase 12.
+**Status:** Phase 6 mock skeleton — API contract, validation, and error handling are real; retrieval is a deterministic mock. The full Amazon Bedrock Knowledge Base implementation is Phase 12. The data-preparation pipeline that will feed that Knowledge Base already exists and is validated — see [ingestion/README.md](ingestion/README.md).
 
-**Stack (planned, Phase 12):** FastAPI, LangChain, ChromaDB, HuggingFace embeddings (`sentence-transformers/all-MiniLM-L6-v2`), Llama.cpp. **Stack (this phase):** FastAPI + Pydantic only — no model downloads, no API keys.
+**Stack (planned, Phase 12):** FastAPI + boto3, querying an Amazon Bedrock Knowledge Base through the `Retrieve` API only (not `RetrieveAndGenerate`). The Knowledge Base indexes per-call documents stored in Amazon S3, embedded with Amazon Titan Text Embeddings V2. **Stack (this phase):** FastAPI + Pydantic only — no model downloads, no API keys.
 
 **Called by:** n8n, directly — in parallel with the Call Signal Analyser. Not called by the LangGraph agent.
 
 ## Endpoints
 
 - `GET /health` → `{"status": "ok", "service": "rag_service", "version": "0.1.0"}`
-- `POST /query` → mock similar-calls response (see below). Real behavior in Phase 12: retrieves grounded, cited historical calls from ChromaDB.
+- `POST /query` → mock similar-calls response (see below). Real behavior in Phase 12: retrieves grounded, cited historical calls from the Amazon Bedrock Knowledge Base.
 
 ### `POST /query` request
 
@@ -50,7 +50,7 @@ Validation: `transcript` is required, non-empty, minimum 20 characters. `top_k` 
 }
 ```
 
-The mock response is drawn from a small hardcoded pool of five example calls (not from `data/historical_sales_calls.csv` — that file's existence is optionally logged at startup, but it is never read or ingested in this phase) and is fully deterministic: the same request always returns the same response, so tests are repeatable.
+The mock response is drawn from a small hardcoded pool of five example calls (not from `data/historical_sales_calls.csv` — that file's existence is optionally logged at startup, but this service does not call Bedrock or read the CSV in this phase) and is fully deterministic: the same request always returns the same response, so tests are repeatable.
 
 ## Error handling
 
@@ -100,4 +100,4 @@ docker run -p 8001:8001 xsight-rag-service
 
 Or via the root `docker-compose.yml` (`docker compose up rag_service`).
 
-See [CLAUDE.md](../../CLAUDE.md) and [docs/api_contracts.md](../../docs/api_contracts.md) for the full contract, and [docs/dataset_design.md](../../docs/dataset_design.md) for the corpus schema this service will eventually retrieve from.
+See [CLAUDE.md](../../CLAUDE.md) and [docs/api_contracts.md](../../docs/api_contracts.md) for the full contract, [docs/dataset_design.md](../../docs/dataset_design.md) for the corpus schema this service will eventually retrieve from, and [ingestion/README.md](ingestion/README.md) for the Amazon Bedrock Knowledge Base data-preparation pipeline already built and validated ahead of the Phase 12 implementation.

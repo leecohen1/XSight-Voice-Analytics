@@ -2,7 +2,8 @@
 
 These preserve the production API contract documented in CLAUDE.md and
 docs/api_contracts.md. Phase 6 implements validation and shape only —
-POST /query returns a deterministic mock, not a real ChromaDB retrieval.
+POST /query returns a deterministic mock, not a real Amazon Bedrock
+Knowledge Base retrieval.
 """
 from typing import Optional
 

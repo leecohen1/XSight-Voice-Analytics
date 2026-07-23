@@ -1,11 +1,13 @@
 """XSight RAG Service — FastAPI mock skeleton (Phase 6).
 
-Real behavior (Phase 12): LangChain + ChromaDB + HuggingFace embeddings +
-Llama.cpp, retrieving grounded historical-call evidence from
-data/historical_sales_calls.csv via ChromaDB. This phase implements the API
-contract, validation, and error handling only — POST /query returns a
-deterministic mock response, clearly labeled `"mock": true`, and does not
-read ChromaDB or ingest the CSV.
+Real behavior (Phase 12): Amazon Bedrock Knowledge Base, queried through the
+Retrieve API only (not RetrieveAndGenerate), retrieving grounded
+historical-call evidence from per-call documents stored in Amazon S3. See
+services/rag_service/ingestion/ for the pipeline that converts
+data/historical_sales_calls.csv into those documents. This phase implements
+the API contract, validation, and error handling only — POST /query returns
+a deterministic mock response, clearly labeled `"mock": true`, and does not
+call Bedrock or ingest the CSV.
 """
 import logging
 import os
@@ -44,7 +46,7 @@ logger = logging.getLogger(SERVICE_NAME)
 async def lifespan(app: FastAPI):
     # Optional confirmation only, per Phase 6 scope — never read/ingested here.
     if HISTORICAL_CSV_PATH.exists():
-        logger.info("Historical dataset found at %s (not read — ingestion is Phase 12).", HISTORICAL_CSV_PATH)
+        logger.info("Historical dataset found at %s (not read — Bedrock retrieval is Phase 12).", HISTORICAL_CSV_PATH)
     else:
         logger.warning("Historical dataset not found at %s. Not required for mock responses.", HISTORICAL_CSV_PATH)
     yield
@@ -53,7 +55,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="XSight RAG Service", version=SERVICE_VERSION, lifespan=lifespan)
 
 # Small, hardcoded mock corpus for deterministic responses only.
-# NOT sourced from data/historical_sales_calls.csv — real ingestion is Phase 12.
+# NOT sourced from data/historical_sales_calls.csv — real Bedrock retrieval is Phase 12.
 _MOCK_POOL = [
     SimilarCall(
         call_id="CALL_007", agent_name="Daniel Cohen", sale_result="Sale",

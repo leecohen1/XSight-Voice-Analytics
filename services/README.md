@@ -4,7 +4,7 @@ FastAPI microservices that make up the XSight AI backend. Each service is indepe
 
 ## Services
 
-- **rag_service** — Sales Call RAG Service. LangChain + ChromaDB + HuggingFace embeddings + Llama.cpp. Retrieves similar historical sales calls with grounded, cited insights.
+- **rag_service** — Sales Call RAG Service. Amazon Bedrock Knowledge Base (S3 data source, Titan Text Embeddings V2, `Retrieve` API only). Retrieves similar historical sales calls with grounded, cited insights.
 - **call_signal_analyser** — Voice / Call Signal Analyser. PyTorch feature-based classifier operating on transcript-derived features only (no audio processing).
 - **guardrails_service** — NeMo Guardrails input/output validation service.
 - **langgraph_agent** — LangGraph Sales Agent (Planner → Tool Execution → Synthesizer) exposed via FastAPI, producing reasoning, coaching feedback, and recommended next actions.
