@@ -1,67 +1,87 @@
-# n8n Setup — Phase 9, Iteration 1
+# n8n Setup — Full Pipeline (Nodes 1–16)
 
-Setup instructions for importing and running `workflows/phase9_iteration1_intake_to_assemblyai.json` — the first slice of the real n8n workflow (webhook → pre-transcription guardrails → AssemblyAI upload → job accepted).
+Setup instructions for the live workflow `XSight - Full Pipeline (Nodes 1-16) - Intake to Final Analysis and Routing` (n8n Cloud workflow ID `RBII7JvRDFWwy98x`), exported to `workflows/phase9_16_full_pipeline_intake_to_final_analysis.json`. This supersedes the old Iteration 1 setup notes below for the connectivity/credential steps; the AssemblyAI section of that original file is still accurate and repeated here for completeness.
 
-**Scope of this iteration (do not expect more than this):**
-
-1. Webhook Trigger receives the submission.
-2. Pre-Transcription Guardrails Check calls `guardrails_service POST /check/input` (`stage: pre_transcription`).
-3. If guardrails reject, respond `422` immediately — stop.
-4. If guardrails pass, upload the audio file to AssemblyAI (`POST /v2/upload`).
-5. Submit a transcription job (`POST /v2/transcript`, with `speaker_labels: true`).
-6. Respond `202 Accepted` with the AssemblyAI job id.
-
-**Explicitly NOT in this iteration** (see CLAUDE.md's architecture flow for where these fit later): AssemblyAI callback/webhook handling, polling for job completion, post-transcription content guardrails, Gemini extraction, the n8n AI Agent Node, RAG Service calls, Call Signal Analyser calls, LangGraph, the Final Analysis Chain, output guardrails, or routing. The workflow **stops** at "job accepted."
-
-**Not yet verified against a live n8n instance.** This JSON was hand-built against n8n's documented node schema (Webhook, HTTP Request, IF, Respond to Webhook at their current typeVersions) but has not been imported into an actual n8n Cloud workspace and executed — I don't have access to one. Import it, run a test submission, and treat any node-parameter mismatch as an n8n-version quirk to fix on import, not a sign the overall flow is wrong.
+**Everything through node 15 (the Router) has been verified with simulated end-to-end test executions** (real Code/Set/IF logic, simulated external responses for AssemblyAI/Gemini/RAG/Call-Signal-Analyser/LangGraph) — see `README.md`'s "Verified test runs" section. **A fully live run (real credentials, real network calls to all four services) has not been executed** — the steps below are exactly what's needed to do that.
 
 ---
 
-## Prerequisites
+## 1. Gemini credential (blocks a live run)
 
-1. **An n8n Cloud account** (or a local n8n instance — see the connectivity note below).
-2. **An AssemblyAI account and API key** — sign up at assemblyai.com, copy the API key from your dashboard. Free tier is sufficient for this iteration's testing.
-3. **`services/guardrails_service` running and reachable from n8n.**
-   - If using **n8n Cloud**: n8n Cloud cannot reach `localhost` directly. You need a tunnel (ngrok, Cloudflare Tunnel) exposing your local `guardrails_service` (port 8003), or a deployed instance. **This connectivity approach is still an open decision** (see `docs/PROGRESS.md` — "n8n local development approach"), deferred to a later Phase 9 iteration. For now, stand up whichever tunnel you have available and use its public URL.
-   - If using **local n8n via Docker Compose**: n8n can reach `guardrails_service` via the Docker network directly (e.g. `http://guardrails_service:8003` if both are on the same compose network) — no tunnel needed. This repo's root `docker-compose.yml` (Phase 6) already runs `guardrails_service`; adding an n8n service to that compose file is part of the still-open connectivity decision.
+Three nodes need a Gemini credential that does **not exist yet** in the connected n8n instance:
 
-## Environment variables (set in n8n)
+- `Gemini Information Extractor`
+- `AI Agent Node - Classify and Enrich`
+- `Gemini Final Analysis Chain`
 
-In n8n Cloud: **Settings → Environment Variables** (or per-credential, if you prefer n8n's credential store over the plain expressions this workflow uses). In local n8n via Docker Compose: pass as container environment variables.
+All three reference a credential named exactly **`Gemini API - XSight`** (n8n credential type `Google Gemini(PaLM) Api`, internally `googlePalmApi`). To fix:
 
-| Variable | Example value | Notes |
+1. In n8n, go to **Credentials → Add Credential → Google Gemini(PaLM) Api**.
+2. Name it exactly `Gemini API - XSight` (or bind the existing unresolved reference to whatever credential you create — n8n will prompt you to select one for each of the three nodes since the reference currently has no ID).
+3. Paste a real Gemini API key (from Google AI Studio / Google Cloud).
+4. Open each of the three nodes and confirm the credential is now resolved (no red warning icon).
+5. Each node currently targets `modelId: models/gemini-2.5-flash`. This has **not been confirmed reachable** with a real key/region — open each Gemini node and verify the model is available to your key, adjusting if needed.
+
+**Do not** treat any placeholder/mock string as a working key — the workflow will not call Gemini successfully until a real key is bound.
+
+---
+
+## 2. Backend service URLs (blocks a live run for nodes 9, 10, 12)
+
+Three environment variables must be set to URLs n8n can actually reach:
+
+| Variable | Used by | Notes |
 |---|---|---|
-| `GUARDRAILS_SERVICE_URL` | `https://your-tunnel-id.ngrok-free.app` | No trailing slash. Must be reachable from wherever n8n actually runs. |
-| `ASSEMBLYAI_API_KEY` | `your-assemblyai-api-key` | From your AssemblyAI dashboard. Never commit this value — it's a secret, kept out of the workflow JSON itself (referenced via `{{ $env.ASSEMBLYAI_API_KEY }}`, not hardcoded). |
+| `RAG_SERVICE_URL` | `HTTP Request - RAG Service` (node 9) | No trailing slash. Real service (Amazon Bedrock KB) — already deployed per `docs/PROGRESS.md`, but **this build could not confirm which host/port it's reachable at from n8n**. |
+| `CALL_SIGNAL_ANALYSER_URL` | `HTTP Request - Call Signal Analyser` (node 10) | No trailing slash. Per `docs/PROGRESS.md`, still a Phase 6 mock skeleton as of this build — confirm it's actually running somewhere reachable before testing live. |
+| `LANGGRAPH_AGENT_URL` | `HTTP Request - LangGraph Agent` (node 12) | No trailing slash. Per `docs/PROGRESS.md`, still a Phase 6 mock skeleton as of this build. |
 
-## Import steps
-
-1. In n8n, go to **Workflows → Import from File** (or **Import from URL**) and select `n8n/workflows/phase9_iteration1_intake_to_assemblyai.json`.
-2. Set the two environment variables above.
-3. Open the **Webhook Trigger** node and copy its **Test URL** (and **Production URL**, once you activate the workflow) — you'll need this for the curl examples in `n8n/examples.md`.
-4. Make sure `guardrails_service` is running and reachable at `GUARDRAILS_SERVICE_URL` (test with `curl $GUARDRAILS_SERVICE_URL/health` first).
-5. Click **Execute Workflow** in n8n (test mode) or send a real request to the Test URL (see `n8n/examples.md`).
-6. Do **not** toggle the workflow to **Active** for production use yet — this iteration is for review and local/test-mode validation only.
-
-## Known gaps to expect on first import
-
-- **Binary data handling on the Webhook node** varies slightly by n8n version. This workflow assumes multipart/form-data is parsed automatically into `$binary.audio_file` (matching a form field literally named `audio_file`) and other fields into `$json.body.*`. If your n8n version handles this differently, adjust the Webhook node's options and the two downstream expressions that reference `$binary.audio_file` accordingly.
-- **HTTP Request node `typeVersion`** — built against `4.2` (a recent, common version). Older n8n installs may present a slightly different parameter panel (e.g. `bodyParametersJson` instead of `jsonBody`) after import; the request shape and target URLs are correct regardless.
-- **AssemblyAI response field names** are current as of this iteration's design (`upload_url` from `/v2/upload`, `id`/`status` from `/v2/transcript`) — verify against AssemblyAI's current API docs if anything fails, since third-party APIs can change.
-
-## Testing this iteration
-
-See `n8n/examples.md` for full webhook payload examples and curl commands. Quick smoke test once imported and env vars are set:
+**What we know for certain:** `guardrails_service` is deployed to a real AWS EC2 instance and the existing pre-transcription guardrails node is hardcoded to `http://3.151.162.120:8003` (confirmed by reading the live workflow's node parameters directly). **What we do not know:** whether `rag_service`, `call_signal_analyser`, and `langgraph_agent` are deployed on that same EC2 host on ports 8001/8002/8004 (matching `docker-compose.yml`'s port assignments), or are only runnable locally. **Before setting these env vars, verify with curl**, e.g.:
 
 ```bash
-curl -i -X POST "<your webhook test URL>" \
-  -F "audio_file=@/path/to/a/short/test.mp3" \
-  -F "agent_name=Sarah Levi" \
-  -F "call_date=2026-07-15"
+curl http://3.151.162.120:8001/health   # if this responds, RAG_SERVICE_URL=http://3.151.162.120:8001
+curl http://3.151.162.120:8002/health   # if this responds, CALL_SIGNAL_ANALYSER_URL=http://3.151.162.120:8002
+curl http://3.151.162.120:8004/health   # if this responds, LANGGRAPH_AGENT_URL=http://3.151.162.120:8004
 ```
 
-Expect either:
-- `202 Accepted` with an `assemblyai_job_id`, or
-- `422` with a `GUARDRAILS_REJECTED` error (check the `flags` for why — likely a file-format/size/metadata issue if this happens on a clean test file).
+If any of those don't respond, that service is likely only running locally via `docker compose up -d` (see `docs/api_contracts.md`), in which case it needs the same tunnel treatment as `guardrails_service` originally did: stand up ngrok or a Cloudflare Tunnel pointed at the relevant local port (8001/8002/8004) and set the corresponding env var to the tunnel's public HTTPS URL. **This step could not be completed from this environment** — no shell access to the actual service hosts or ability to start a tunnel from here. This is the single manual step most likely to block a fully live end-to-end test today.
 
-Stop here and report back for review — do not proceed to the next iteration (callback handling, post-transcription guardrails) without explicit approval.
+Set these in n8n Cloud under **Settings → Environment Variables**, or as container environment variables if running n8n locally via Docker Compose.
+
+---
+
+## 3. AssemblyAI (unchanged from the earlier iteration — already working)
+
+An `AssemblyAI` credential (type `httpHeaderAuth`) already exists in the connected instance and is already bound to the `Upload Audio to AssemblyAI` and `Submit Transcription Job` / `Poll AssemblyAI Transcript Status` nodes. No action needed unless the key has expired.
+
+---
+
+## 4. Import / activation steps
+
+1. If working from a fresh n8n instance instead of the already-connected one: **Workflows → Import from File**, select `n8n/workflows/phase9_16_full_pipeline_intake_to_final_analysis.json`.
+2. Complete steps 1 and 2 above (Gemini credential, three service URLs).
+3. Test with a real submission against the Webhook Trigger's Test URL (multipart form: `audio_file`, `agent_name`, `call_date`, optional `customer_name`/`notes` — see `examples.md`).
+4. Confirm the response is a `200` with the complete final-output JSON (`guardrail_status: "pass"` or `"human_review_required"`), or a structured `error` response if something upstream failed — **never a raw n8n exception**.
+5. Only then consider activating the workflow (**Active** toggle) for anything beyond manual/test-mode runs.
+
+## 5. What "done" looks like without a live run
+
+Because of the two open items above (Gemini credential, three service URLs), this build's verification is a **simulated end-to-end test**, not a live one: `test_workflow` executed every Code/Set/IF node for real and substituted realistic mock responses only for the four external HTTP/Gemini calls. See `README.md`'s "Verified test runs" for exact results (execution IDs `15` auto-pass, `16` human-review-required). Once sections 1 and 2 above are completed, the same webhook payload should produce an equivalent live result — nothing in the node logic itself depends on the calls being simulated.
+
+---
+
+## Historical: Iteration 1 setup (nodes 1–4 only, superseded by the above for full-pipeline testing)
+
+**Scope of that original iteration:** Webhook Trigger → Pre-Transcription Guardrails Check → AssemblyAI upload → job accepted (no polling, no downstream analysis). The live workflow has since grown real AssemblyAI polling (Iteration 2a) and then the full pipeline documented above — kept here only for historical context.
+
+### Prerequisites (still accurate)
+
+1. **An n8n Cloud account** (or a local n8n instance).
+2. **An AssemblyAI account and API key** — already configured (see section 3 above).
+3. **`services/guardrails_service` running and reachable from n8n** — already resolved: deployed to `http://3.151.162.120:8003`.
+
+### Known gaps to expect on first import (still accurate for any node in the workflow)
+
+- **Binary data handling on the Webhook node** varies slightly by n8n version. This workflow assumes multipart/form-data is parsed automatically into `$binary.audio_file` (matching a form field literally named `audio_file`) and other fields into `$json.body.*`.
+- **HTTP Request node `typeVersion`** — built against `4.4` throughout the full pipeline (a recent, common version).
+- **AssemblyAI response field names** are current as of this build — verify against AssemblyAI's current API docs if anything fails.

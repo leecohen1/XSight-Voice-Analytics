@@ -1,0 +1,1690 @@
+﻿{
+    "name":  "XSight - Full Pipeline (Nodes 1-16) - Intake to Final Analysis and Routing",
+    "nodes":  [
+                  {
+                      "parameters":  {
+                                         "httpMethod":  "POST",
+                                         "path":  "xsight-phase9-iteration1-mock-input-validation",
+                                         "responseMode":  "responseNode",
+                                         "options":  {
+                                                         "binaryPropertyName":  "audio_file"
+                                                     }
+                                     },
+                      "id":  "439da7b7-8622-4596-aa1f-8b562d0367b3",
+                      "name":  "Webhook Trigger",
+                      "type":  "n8n-nodes-base.webhook",
+                      "typeVersion":  2.1,
+                      "position":  [
+                                       -2080,
+                                       -112
+                                   ],
+                      "webhookId":  "ac5cb125-5a8c-4a83-b93e-790db888a911"
+                  },
+                  {
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { stage: \"pre_transcription\", file_metadata: { filename: $binary.audio_file.fileName, mime_type: $binary.audio_file.mimeType, size_bytes: $binary.audio_file.bytes, duration_seconds: $json.body.duration_seconds }, submission_metadata: { agent_name: $json.body.agent_name, call_date: $json.body.call_date } } }}",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "bb9d56df-c182-4e03-99ce-f25b13dd050c",
+                      "name":  "Prepare Guardrails Payload",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       -1344,
+                                       -128
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "http://3.151.162.120:8003/check/input",
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={{$json}}",
+                                         "options":  {
+                                                         "timeout":  15000
+                                                     }
+                                     },
+                      "id":  "c65f92e5-82a9-43c0-be82-a4edc415f908",
+                      "name":  "HTTP Request - Pre-Transcription Guardrails",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.4,
+                      "position":  [
+                                       -1152,
+                                       -128
+                                   ],
+                      "retryOnFail":  true,
+                      "maxTries":  3,
+                      "waitBetweenTries":  1000,
+                      "onError":  "continueErrorOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict",
+                                                                            "version":  3
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "leftValue":  "={{ $json.pass }}",
+                                                                                   "operator":  {
+                                                                                                    "type":  "boolean",
+                                                                                                    "operation":  "true"
+                                                                                                },
+                                                                                   "rightValue":  true,
+                                                                                   "id":  "31bc6fa9-f8ae-4d45-969c-38a952c90121"
+                                                                               }
+                                                                           ],
+                                                            "combinator":  "and"
+                                                        },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "77eec3c9-cff9-4bc0-b0eb-979fcbc34f35",
+                      "name":  "IF - Guardrails Passed",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.3,
+                      "position":  [
+                                       -976,
+                                       -464
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "respondWith":  "json",
+                                         "responseBody":  "={{ $json.response }}",
+                                         "options":  {
+                                                         "responseCode":  "={{ $json.http_status }}"
+                                                     }
+                                     },
+                      "id":  "adaefe79-1470-43f3-b4a1-85d4e2f37094",
+                      "name":  "Respond Error",
+                      "type":  "n8n-nodes-base.respondToWebhook",
+                      "typeVersion":  1.5,
+                      "position":  [
+                                       1648,
+                                       1216
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "1",
+                                                                                     "name":  "started_at_ms",
+                                                                                     "value":  "={{ $now.toMillis() }}",
+                                                                                     "type":  "number"
+                                                                                 }
+                                                                             ]
+                                                         },
+                                         "includeOtherFields":  true,
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "4a5bd840-24d2-4b75-a4b5-4e269fa1bdba",
+                      "name":  "Capture Start Time",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       -1568,
+                                       -128
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "mode":  "runOnceForEachItem",
+                                         "jsCode":  "const item = $input.item;\nconst binaryKeys = Object.keys(item.binary || {});\n\nif (binaryKeys.length === 0) {\n  throw new Error(\u0027binary_missing: no binary audio file found in the incoming request. Expected a multipart/form-data field named \"audio_file\".\u0027);\n}\n\nlet selectedKey;\nif (binaryKeys.includes(\u0027audio_file\u0027)) {\n  selectedKey = \u0027audio_file\u0027;\n} else if (binaryKeys.includes(\u0027audio_file0\u0027)) {\n  selectedKey = \u0027audio_file0\u0027;\n} else {\n  selectedKey = binaryKeys[0];\n}\n\nreturn {\n  json: item.json,\n  binary: {\n    audio_file: item.binary[selectedKey]\n  }\n};"
+                                     },
+                      "id":  "346375f1-38c9-4726-a1c8-974261a61dc9",
+                      "name":  "Normalize Binary Input",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       -1824,
+                                       -112
+                                   ],
+                      "onError":  "continueErrorOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "1",
+                                                                                     "name":  "audio_file",
+                                                                                     "value":  "={{ $(\u0027Normalize Binary Input\u0027).item.binary.audio_file }}",
+                                                                                     "type":  "binary"
+                                                                                 }
+                                                                             ]
+                                                         },
+                                         "includeOtherFields":  true,
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "2d130069-ae26-4719-8cdf-fe599c3c2eb6",
+                      "name":  "Reattach Audio Binary",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       -592,
+                                       -480
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "https://api.assemblyai.com/v2/upload",
+                                         "authentication":  "genericCredentialType",
+                                         "genericAuthType":  "httpHeaderAuth",
+                                         "sendBody":  true,
+                                         "contentType":  "binaryData",
+                                         "inputDataFieldName":  "audio_file",
+                                         "options":  {
+                                                         "timeout":  30000
+                                                     }
+                                     },
+                      "id":  "a34f14ca-8a81-4d10-9b3a-32fb6af8c694",
+                      "name":  "Upload Audio to AssemblyAI",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.4,
+                      "position":  [
+                                       -336,
+                                       -480
+                                   ],
+                      "retryOnFail":  true,
+                      "maxTries":  3,
+                      "waitBetweenTries":  1000,
+                      "onError":  "continueErrorOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "https://api.assemblyai.com/v2/transcript",
+                                         "authentication":  "genericCredentialType",
+                                         "genericAuthType":  "httpHeaderAuth",
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={{ { audio_url: $json.upload_url, speaker_labels: true } }}",
+                                         "options":  {
+                                                         "timeout":  15000
+                                                     }
+                                     },
+                      "id":  "b1d740d6-8782-465e-a23f-15b23f902286",
+                      "name":  "Submit Transcription Job",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.4,
+                      "position":  [
+                                       -96,
+                                       -496
+                                   ],
+                      "retryOnFail":  true,
+                      "maxTries":  3,
+                      "waitBetweenTries":  1000,
+                      "onError":  "continueErrorOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "assignments":  {
+                                                             "assignments":  [
+                                                                                 {
+                                                                                     "id":  "1",
+                                                                                     "name":  "transcript_id",
+                                                                                     "value":  "={{ $json.id }}",
+                                                                                     "type":  "string"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "2",
+                                                                                     "name":  "transcript_status",
+                                                                                     "value":  "={{ $json.status }}",
+                                                                                     "type":  "string"
+                                                                                 },
+                                                                                 {
+                                                                                     "id":  "4",
+                                                                                     "name":  "polling_started_at_ms",
+                                                                                     "value":  "={{ $now.toMillis() }}",
+                                                                                     "type":  "number"
+                                                                                 }
+                                                                             ]
+                                                         },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "8b9f2687-4ee2-41b2-9281-9db965485a0c",
+                      "name":  "Initialize Polling",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       208,
+                                       -512
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "amount":  3
+                                     },
+                      "id":  "42fa95d1-a21e-4aa9-85e0-4b8f453383d3",
+                      "name":  "Wait - Poll Interval",
+                      "type":  "n8n-nodes-base.wait",
+                      "typeVersion":  1.1,
+                      "position":  [
+                                       480,
+                                       -512
+                                   ],
+                      "webhookId":  "1cb6e79d-c225-47fd-9170-b60f0405bf70"
+                  },
+                  {
+                      "parameters":  {
+                                         "url":  "=https://api.assemblyai.com/v2/transcript/{{ $(\u0027Initialize Polling\u0027).item.json.transcript_id }}",
+                                         "authentication":  "genericCredentialType",
+                                         "genericAuthType":  "httpHeaderAuth",
+                                         "options":  {
+                                                         "timeout":  15000
+                                                     }
+                                     },
+                      "id":  "3f0deb31-a0fe-48d3-a92c-a4c6af1f81c3",
+                      "name":  "Poll AssemblyAI Transcript Status",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.4,
+                      "position":  [
+                                       800,
+                                       112
+                                   ],
+                      "retryOnFail":  true,
+                      "maxTries":  3,
+                      "waitBetweenTries":  1000,
+                      "onError":  "continueErrorOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict",
+                                                                            "version":  1
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "leftValue":  "={{ $now.toMillis() - $(\u0027Initialize Polling\u0027).item.json.polling_started_at_ms }}",
+                                                                                   "operator":  {
+                                                                                                    "type":  "number",
+                                                                                                    "operation":  "gte"
+                                                                                                },
+                                                                                   "rightValue":  120000
+                                                                               }
+                                                                           ],
+                                                            "combinator":  "and"
+                                                        },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "9ec5be38-f2ea-4e7c-8f1e-c2181e8bd84c",
+                      "name":  "IF - Max Polling Time Reached",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.3,
+                      "position":  [
+                                       1616,
+                                       416
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { transcription: { transcript_id: $json.id ?? null, provider: \"assemblyai\", status: $json.status ?? null, language_code: $json.language_code ?? null, confidence: $json.confidence ?? null, duration_ms: ($json.audio_duration !== undefined \u0026\u0026 $json.audio_duration !== null) ? Math.round($json.audio_duration * 1000) : null, full_text: $json.text ?? null, utterances: ($json.utterances ?? []).map(u =\u003e ({ speaker: u.speaker != null ? \"Speaker \" + u.speaker : null, text: u.text ?? null, start_ms: u.start ?? null, end_ms: u.end ?? null, confidence: u.confidence ?? null })) } } }}",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "a02b110b-d1a4-4286-942f-3366bf95243f",
+                      "name":  "Normalize Transcript",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       1280,
+                                       -288
+                                   ],
+                      "onError":  "continueErrorOutput"
+                  },
+                  {
+                      "parameters":  {
+                                         "rules":  {
+                                                       "values":  [
+                                                                      {
+                                                                          "conditions":  {
+                                                                                             "options":  {
+                                                                                                             "caseSensitive":  true,
+                                                                                                             "leftValue":  "",
+                                                                                                             "typeValidation":  "strict",
+                                                                                                             "version":  1
+                                                                                                         },
+                                                                                             "conditions":  [
+                                                                                                                {
+                                                                                                                    "leftValue":  "={{ $json.status }}",
+                                                                                                                    "operator":  {
+                                                                                                                                     "type":  "string",
+                                                                                                                                     "operation":  "equals"
+                                                                                                                                 },
+                                                                                                                    "rightValue":  "completed"
+                                                                                                                }
+                                                                                                            ],
+                                                                                             "combinator":  "and"
+                                                                                         },
+                                                                          "renameOutput":  true,
+                                                                          "outputKey":  "completed"
+                                                                      },
+                                                                      {
+                                                                          "conditions":  {
+                                                                                             "options":  {
+                                                                                                             "caseSensitive":  true,
+                                                                                                             "leftValue":  "",
+                                                                                                             "typeValidation":  "strict",
+                                                                                                             "version":  1
+                                                                                                         },
+                                                                                             "conditions":  [
+                                                                                                                {
+                                                                                                                    "leftValue":  "={{ $json.status }}",
+                                                                                                                    "operator":  {
+                                                                                                                                     "type":  "string",
+                                                                                                                                     "operation":  "equals"
+                                                                                                                                 },
+                                                                                                                    "rightValue":  "error"
+                                                                                                                }
+                                                                                                            ],
+                                                                                             "combinator":  "and"
+                                                                                         },
+                                                                          "renameOutput":  true,
+                                                                          "outputKey":  "error"
+                                                                      },
+                                                                      {
+                                                                          "conditions":  {
+                                                                                             "options":  {
+                                                                                                             "caseSensitive":  true,
+                                                                                                             "leftValue":  "",
+                                                                                                             "typeValidation":  "strict",
+                                                                                                             "version":  1
+                                                                                                         },
+                                                                                             "conditions":  [
+                                                                                                                {
+                                                                                                                    "leftValue":  "={{ $json.status }}",
+                                                                                                                    "operator":  {
+                                                                                                                                     "type":  "string",
+                                                                                                                                     "operation":  "equals"
+                                                                                                                                 },
+                                                                                                                    "rightValue":  "queued"
+                                                                                                                },
+                                                                                                                {
+                                                                                                                    "leftValue":  "={{ $json.status }}",
+                                                                                                                    "operator":  {
+                                                                                                                                     "type":  "string",
+                                                                                                                                     "operation":  "equals"
+                                                                                                                                 },
+                                                                                                                    "rightValue":  "processing"
+                                                                                                                }
+                                                                                                            ],
+                                                                                             "combinator":  "or"
+                                                                                         },
+                                                                          "renameOutput":  true,
+                                                                          "outputKey":  "in_progress"
+                                                                      }
+                                                                  ]
+                                                   },
+                                         "options":  {
+                                                         "fallbackOutput":  "extra",
+                                                         "renameFallbackOutput":  "unexpected"
+                                                     }
+                                     },
+                      "id":  "6a060cda-1375-4ae1-b4f6-7e695e500e35",
+                      "name":  "Switch - Transcript Status",
+                      "type":  "n8n-nodes-base.switch",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       1200,
+                                       272
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ (() =\u003e {\n  const rawError = $json?.error;\n  const normalizedError =\n    typeof rawError === \u0027string\u0027\n      ? rawError\n      : typeof rawError?.message === \u0027string\u0027\n        ? rawError.message\n        : typeof $json?.message === \u0027string\u0027\n          ? $json.message\n          : \u0027Unknown workflow error\u0027;\n\n  const e = $json.pass === false ? { c: \"guardrails_rejected\", s: \"pre_transcription\", h: 400, m: \"The submission was rejected by pre-transcription validation.\" }\n    : ($json.error !== undefined \u0026\u0026 $json.status === \"completed\") ? { c: \"normalization_failed\", s: \"transcription\", h: 500, m: \"The transcript was received but could not be normalized.\" }\n    : $json.status === \"error\" ? { c: \"transcription_failed\", s: \"transcription\", h: 502, m: \"The transcription provider reported a failure for this audio file.\" }\n    : ($json.status === \"queued\" || $json.status === \"processing\") ? { c: \"transcription_timeout\", s: \"transcription\", h: 504, m: \"Transcription did not complete within the allowed time.\" }\n    : $json.status !== undefined ? { c: \"unexpected_transcription_status\", s: \"transcription\", h: 502, m: \"The transcription provider returned an unrecognized status.\" }\n    : normalizedError.includes(\"binary_missing\") ? { c: \"binary_missing\", s: \"input_validation\", h: 400, m: \"No audio file was found in the request. Attach the audio as multipart field audio_file.\" }\n    : $json.transcript_id !== undefined ? { c: \"assemblyai_poll_failed\", s: \"poll_transcript\", h: 502, m: \"Failed while polling AssemblyAI transcription status\" }\n    : $json.upload_url !== undefined ? { c: \"assemblyai_submit_failed\", s: \"submit_transcription\", h: 502, m: \"Failed while submitting the transcription request to AssemblyAI\" }\n    : $json.checks !== undefined ? { c: \"assemblyai_upload_failed\", s: \"upload_audio\", h: 502, m: \"Failed while uploading the audio file to AssemblyAI\" }\n    : { c: \"guardrails_service_unavailable\", s: \"guardrails\", h: 502, m: \"Guardrails service failed or was unavailable\" };\n\n  return {\n    http_status: e.h,\n    response: {\n      status: \"error\",\n      stage: e.s,\n      error_code: e.c,\n      message: e.m,\n      processing_time_ms: e.s === \"input_validation\" ? null : ($now.toMillis() - $(\u0027Capture Start Time\u0027).item.json.started_at_ms),\n      workflow_version: \"phase9-iteration2\"\n    },\n    debug_error: normalizedError\n  };\n})() }}",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "a9296adb-a917-4fc2-95a4-9036db516746",
+                      "name":  "Build Error Response",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       1504,
+                                       1216
+                                   ]
+                  },
+                  {
+                      "id":  "8d1b8408-8f6a-4d18-b9a4-e20e3bdbad2b",
+                      "name":  "Build Speaker-Tagged Transcript",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1600,
+                                       -600
+                                   ],
+                      "parameters":  {
+                                         "mode":  "runOnceForAllItems",
+                                         "language":  "javaScript",
+                                         "jsCode":  "const t = $json.transcription || {};\nconst utterances = Array.isArray(t.utterances) ? t.utterances : [];\nconst durationMs = (typeof t.duration_ms === \u0027number\u0027 \u0026\u0026 t.duration_ms \u003e 0) ? t.duration_ms : null;\nconst fullText = t.full_text || \u0027\u0027;\nconst webhookBody = $(\u0027Webhook Trigger\u0027).item.json.body || {};\n\nlet speakerToRole = {};\nlet taggedLines = [];\nlet agentWords = 0;\nlet customerWords = 0;\nlet totalSpeechMs = 0;\nlet assumptionNotes = [];\n\nif (utterances.length \u003e 0) {\n  for (const u of utterances) {\n    const spk = u.speaker || \u0027Unknown\u0027;\n    if (!(spk in speakerToRole)) {\n      speakerToRole[spk] = Object.keys(speakerToRole).length === 0 ? \u0027Agent\u0027 : \u0027Customer\u0027;\n    }\n    const role = speakerToRole[spk];\n    const text = (u.text || \u0027\u0027).trim();\n    if (!text) continue;\n    taggedLines.push(role + \u0027: \u0027 + text);\n    const wc = text.split(/\\s+/).filter(Boolean).length;\n    if (role === \u0027Agent\u0027) { agentWords += wc; } else { customerWords += wc; }\n    if (typeof u.start_ms === \u0027number\u0027 \u0026\u0026 typeof u.end_ms === \u0027number\u0027 \u0026\u0026 u.end_ms \u003e u.start_ms) {\n      totalSpeechMs += (u.end_ms - u.start_ms);\n    }\n  }\n  assumptionNotes.push(\u0027speaker_role_mapping_heuristic: first speaker to talk assumed Agent, all other distinct speakers folded into Customer (AssemblyAI diarization returns generic Speaker labels, not named roles).\u0027);\n} else {\n  taggedLines.push(\u0027Agent: \u0027 + fullText);\n  assumptionNotes.push(\u0027no_diarization_utterances: AssemblyAI returned no utterances; the entire transcript was tagged as Agent only, Customer turns are unknown.\u0027);\n}\n\nconst taggedTranscript = taggedLines.join(\u0027\\n\u0027);\nconst totalWords = agentWords + customerWords;\nconst agentTalkRatioRaw = totalWords \u003e 0 ? (agentWords / totalWords) : null;\n\nlet callDurationSecondsRaw;\nlet durationIsEstimate = false;\nif (durationMs !== null) {\n  callDurationSecondsRaw = Math.round(durationMs / 1000);\n} else {\n  callDurationSecondsRaw = Math.round((totalWords / 130) * 60);\n  durationIsEstimate = true;\n  assumptionNotes.push(\u0027call_duration_estimated: no measured audio duration from AssemblyAI; estimated from word count at ~130 wpm, not measured.\u0027);\n}\n\nconst speechToNonSpeechRatioRaw = (durationMs \u0026\u0026 totalSpeechMs \u003e 0) ? (totalSpeechMs / durationMs) : null;\nconst silenceRatioRaw = (speechToNonSpeechRatioRaw !== null) ? (1 - speechToNonSpeechRatioRaw) : null;\nconst speakingRateWpmRaw = (callDurationSecondsRaw \u003e 0) ? Math.round(totalWords / (callDurationSecondsRaw / 60)) : null;\n\nfunction clampVal(v, lo, hi, fallback) {\n  if (v === null || v === undefined || isNaN(v)) return { value: fallback, clamped: true, reason: \u0027missing_measurement_used_dataset_midpoint_fallback\u0027 };\n  if (v \u003c lo) return { value: lo, clamped: true, reason: \u0027measured_value_below_service_accepted_range\u0027 };\n  if (v \u003e hi) return { value: hi, clamped: true, reason: \u0027measured_value_above_service_accepted_range\u0027 };\n  return { value: v, clamped: false, reason: null };\n}\n\nconst durationClamp = clampVal(callDurationSecondsRaw, 180, 900, 420);\nconst silenceClamp = clampVal(silenceRatioRaw, 0.05, 0.35, 0.18);\nconst wpmClamp = clampVal(speakingRateWpmRaw, 100, 190, 145);\nconst speechRatioClamp = clampVal(speechToNonSpeechRatioRaw, 0.65, 0.95, 0.82);\nconst talkRatioClamp = clampVal(agentTalkRatioRaw, 0.35, 0.75, 0.55);\n\nconst priceKeywords = /\\b(price|pricing|cost|budget|discount|quote)\\b/gi;\nconst competitorKeywords = /\\b(competitor|competitors|alternative|other vendor|other provider)\\b/gi;\nconst priceMentionsCount = (taggedTranscript.match(priceKeywords) || []).length;\nconst competitorMentionsCount = (taggedTranscript.match(competitorKeywords) || []).length;\nconst questionCount = (taggedTranscript.match(/\\?/g) || []).length;\n\nconst clampedFieldsList = [\n  { field: \u0027call_duration_seconds\u0027, c: durationClamp },\n  { field: \u0027silence_ratio\u0027, c: silenceClamp },\n  { field: \u0027speaking_rate_wpm\u0027, c: wpmClamp },\n  { field: \u0027speech_to_non_speech_ratio\u0027, c: speechRatioClamp },\n  { field: \u0027agent_talk_ratio\u0027, c: talkRatioClamp },\n].filter(x =\u003e x.c.clamped).map(x =\u003e ({ field: x.field, reason: x.c.reason }));\n\nreturn [{\n  json: {\n    transcription: t,\n    submission_metadata: {\n      agent_name: webhookBody.agent_name || null,\n      call_date: webhookBody.call_date || null,\n      customer_name: webhookBody.customer_name || null,\n      notes: webhookBody.notes || null,\n    },\n    tagged_transcript: taggedTranscript,\n    transcript_features: {\n      word_count: totalWords,\n      agent_word_count: agentWords,\n      customer_word_count: customerWords,\n      question_count: questionCount,\n      price_mentions_count: priceMentionsCount,\n      competitor_mentions_count: competitorMentionsCount,\n    },\n    audio_features_measured: {\n      call_duration_seconds: callDurationSecondsRaw,\n      call_duration_is_estimate: durationIsEstimate,\n      silence_ratio: silenceRatioRaw,\n      speech_to_non_speech_ratio: speechToNonSpeechRatioRaw,\n      speaking_rate_wpm: speakingRateWpmRaw,\n      agent_talk_ratio: agentTalkRatioRaw,\n    },\n    audio_features_for_signal_service: {\n      call_duration_seconds: durationClamp.value,\n      silence_ratio: silenceClamp.value,\n      speaking_rate_wpm: wpmClamp.value,\n      speech_to_non_speech_ratio: speechRatioClamp.value,\n      agent_talk_ratio: talkRatioClamp.value,\n    },\n    clamped_fields: clampedFieldsList,\n    pipeline_assumptions: assumptionNotes,\n  }\n}];\n"
+                                     },
+                      "notes":  "Nodes 5+ start here. AssemblyAI diarization only returns generic Speaker 0/1 labels, not Agent/Customer. Heuristic: the first speaker to talk in the call is assumed to be the Agent, every other distinct speaker is folded into Customer. This is a documented assumption, not a verified mapping -- see pipeline_assumptions in the output and n8n/README.md."
+                  },
+                  {
+                      "id":  "fe56b871-dab2-4ff7-8340-eedfc2eb2cad",
+                      "name":  "Post-Transcription Content Check",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1840,
+                                       -600
+                                   ],
+                      "parameters":  {
+                                         "mode":  "runOnceForAllItems",
+                                         "language":  "javaScript",
+                                         "jsCode":  "const transcript = $json.tagged_transcript || \u0027\u0027;\nconst lengthOk = transcript.length \u003e= 20;\nconst injectionPatterns = [/ignore (all|any|previous|the above) instructions/i, /system prompt/i, /jailbreak/i, /disregard (all|the above)/i, /you are now/i, /act as (an? )?(unrestricted|unfiltered)/i];\nconst promptInjectionDetected = injectionPatterns.some(r =\u003e r.test(transcript));\nconst offensivePatterns = [/\\bfuck\\b/i, /\\bshit\\b/i, /\\basshole\\b/i, /\\bidiot\\b/i];\nconst offensiveDetected = offensivePatterns.some(r =\u003e r.test(transcript));\nconst salesKeywords = /\\b(price|pricing|cost|contract|deal|purchase|subscription|demo|proposal|crm|quote|discount|renewal|budget|sales|product|solution|onboarding|trial)\\b/i;\nconst possibleOffTopic = !salesKeywords.test(transcript);\n\nconst reasons = [];\nif (!lengthOk) reasons.push(\u0027transcript_too_short\u0027);\nif (promptInjectionDetected) reasons.push(\u0027prompt_injection_detected\u0027);\nif (offensiveDetected) reasons.push(\u0027offensive_content_detected\u0027);\nif (possibleOffTopic) reasons.push(\u0027possible_off_topic\u0027);\n\nconst pass = lengthOk \u0026\u0026 !promptInjectionDetected \u0026\u0026 !offensiveDetected \u0026\u0026 !possibleOffTopic;\n\nreturn [{\n  json: {\n    ...$json,\n    post_transcription_check: {\n      pass,\n      reasons,\n      note: \u0027Inline deterministic n8n check (Code node) -- not a call to guardrails_service, which does not implement a post_transcription stage yet.\u0027\n    }\n  }\n}];\n"
+                                     },
+                      "notes":  "Inline deterministic post-transcription guardrail. guardrails_service\u0027s real POST /check/input only implements check_pre_transcription_input regardless of the stage field sent -- confirmed in services/guardrails_service/app/main.py, there is no post_transcription branch. Per user decision, this stays as an inline n8n check rather than calling the service a second time."
+                  },
+                  {
+                      "id":  "07672dcc-cb5f-4d99-b0ae-5baad45eabf6",
+                      "name":  "IF - Content Guardrails Passed",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.3,
+                      "position":  [
+                                       2080,
+                                       -600
+                                   ],
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict",
+                                                                            "version":  3
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "id":  "content_pass",
+                                                                                   "leftValue":  "={{ $json.post_transcription_check.pass }}",
+                                                                                   "operator":  {
+                                                                                                    "type":  "boolean",
+                                                                                                    "operation":  "true"
+                                                                                                },
+                                                                                   "rightValue":  true
+                                                                               }
+                                                                           ],
+                                                            "combinator":  "and"
+                                                        },
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "a43e193d-6c87-4b46-9837-461f9c8d7125",
+                      "name":  "Error - Content Guardrails",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       2080,
+                                       120
+                                   ],
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { _pipeline_error: { stage: \u0027post_transcription_guardrails\u0027, error_code: \u0027content_guardrails_rejected\u0027, http_status: 422, message: \u0027Post-transcription content guardrails rejected this transcript: \u0027 + (($json.post_transcription_check \u0026\u0026 $json.post_transcription_check.reasons) || []).join(\u0027, \u0027), debug_error: JSON.stringify($json.post_transcription_check) } } }}",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "fa8a56cf-cdfb-4ae2-9ebe-423e5c21f2be",
+                      "name":  "Gemini Information Extractor",
+                      "type":  "@n8n/n8n-nodes-langchain.googleGemini",
+                      "typeVersion":  1.2,
+                      "position":  [
+                                       2320,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "resource":  "text",
+                                         "operation":  "message",
+                                         "modelId":  {
+                                                         "__rl":  true,
+                                                         "mode":  "list",
+                                                         "value":  "models/gemini-2.5-flash",
+                                                         "cachedResultName":  "models/gemini-2.5-flash"
+                                                     },
+                                         "messages":  {
+                                                          "values":  [
+                                                                         {
+                                                                             "content":  "={{ \u0027TRANSCRIPT (speaker-tagged, Agent/Customer roles assigned by an n8n heuristic -- see pipeline_assumptions):\\n\\n\u0027 + $json.tagged_transcript }}",
+                                                                             "role":  "user"
+                                                                         }
+                                                                     ]
+                                                      },
+                                         "jsonOutput":  true,
+                                         "options":  {
+                                                         "systemMessage":  "You are the XSight Information Extractor, one component in a larger sales-call-analysis pipeline. Your ONLY job is structured semantic extraction from the transcript given to you. You must NEVER generate coaching feedback, recommendations, a call summary judgment, or a final analysis -- other components handle that. Extract only what is explicitly present or clearly and directly implied by the transcript; never invent budgets, names, dates, or outcomes the transcript does not support. If a field cannot be determined confidently, choose the closest neutral/unclear enum value instead of guessing a specific one. Respond with ONLY one JSON object (no markdown code fences, no commentary before or after) matching exactly this shape: {\"customer_intent\": \"high|medium|low|unclear\", \"main_objection\": \"price|timing|trust|competitor|no_need|authority|integration|security|other|none\", \"customer_sentiment\": \"positive|neutral|negative|mixed\", \"closing_attempt\": \"strong|medium|weak|none\", \"key_sales_events\": [\"short string\", \"...\"], \"call_category\": \"a short label such as discovery_call, pricing_negotiation, renewal, demo, or support_escalation\"}.",
+                                                         "temperature":  0.2,
+                                                         "maxOutputTokens":  1024
+                                                     }
+                                     },
+                      "notes":  "n8n node 7. Extraction only -- must never generate coaching feedback or a final analysis (see CLAUDE.md Component responsibility boundaries). Needs a real \u0027Gemini API - XSight\u0027 credential bound by the user before a live run (no credential exists yet in this n8n instance as of this build).",
+                      "onError":  "continueErrorOutput",
+                      "retryOnFail":  true,
+                      "maxTries":  3,
+                      "waitBetweenTries":  1000
+                  },
+                  {
+                      "id":  "dc948897-008d-4d64-9c76-76b7a27c6777",
+                      "name":  "Error - Gemini Extraction",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       2320,
+                                       120
+                                   ],
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { _pipeline_error: { stage: \u0027gemini_information_extractor\u0027, error_code: \u0027gemini_extraction_failed\u0027, http_status: 502, message: \u0027Gemini Information Extractor call failed: \u0027 + (typeof $json.error === \u0027string\u0027 ? $json.error : (($json.error \u0026\u0026 $json.error.message) || \u0027unknown error\u0027)), debug_error: JSON.stringify($json.error || $json) } } }}",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "39387a31-2811-4ddc-a0f5-4efcfa4e7f97",
+                      "name":  "Parse Gemini Extraction",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       2560,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "mode":  "runOnceForAllItems",
+                                         "language":  "javaScript",
+                                         "jsCode":  "function extractText(item) {\n  const candidates = [item.text, item.content, item.output, item.response, item.message, item \u0026\u0026 item.candidates \u0026\u0026 item.candidates[0] \u0026\u0026 item.candidates[0].content \u0026\u0026 item.candidates[0].content.parts \u0026\u0026 item.candidates[0].content.parts[0] \u0026\u0026 item.candidates[0].content.parts[0].text];\n  for (const c of candidates) { if (typeof c === \u0027string\u0027 \u0026\u0026 c.trim().length \u003e 0) return c; }\n  return null;\n}\nfunction parseJsonLoose(text) {\n  if (!text) return null;\n  const cleaned = text.replace(/```json/gi, \u0027\u0027).replace(/```/g, \u0027\u0027).trim();\n  try { return JSON.parse(cleaned); } catch (e) {\n    const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n    if (match) { try { return JSON.parse(match[0]); } catch (e2) { return null; } }\n    return null;\n  }\n}\nconst raw = extractText($json);\nlet parsed = parseJsonLoose(raw);\nconst VALID_INTENT = [\u0027high\u0027,\u0027medium\u0027,\u0027low\u0027,\u0027unclear\u0027];\nconst VALID_OBJECTION = [\u0027price\u0027,\u0027timing\u0027,\u0027trust\u0027,\u0027competitor\u0027,\u0027no_need\u0027,\u0027authority\u0027,\u0027integration\u0027,\u0027security\u0027,\u0027other\u0027,\u0027none\u0027];\nconst VALID_SENTIMENT = [\u0027positive\u0027,\u0027neutral\u0027,\u0027negative\u0027,\u0027mixed\u0027];\nconst VALID_CLOSING = [\u0027strong\u0027,\u0027medium\u0027,\u0027weak\u0027,\u0027none\u0027];\nlet extraction_parse_error = null;\nif (!parsed || typeof parsed !== \u0027object\u0027) {\n  extraction_parse_error = \u0027gemini_response_not_valid_json\u0027;\n  parsed = {};\n}\nconst extraction = {\n  customer_intent: VALID_INTENT.includes(parsed.customer_intent) ? parsed.customer_intent : \u0027unclear\u0027,\n  main_objection: VALID_OBJECTION.includes(parsed.main_objection) ? parsed.main_objection : \u0027other\u0027,\n  customer_sentiment: VALID_SENTIMENT.includes(parsed.customer_sentiment) ? parsed.customer_sentiment : \u0027neutral\u0027,\n  closing_attempt: VALID_CLOSING.includes(parsed.closing_attempt) ? parsed.closing_attempt : \u0027none\u0027,\n  key_sales_events: Array.isArray(parsed.key_sales_events) ? parsed.key_sales_events : [],\n  call_category: typeof parsed.call_category === \u0027string\u0027 ? parsed.call_category : \u0027uncategorized\u0027,\n};\nreturn [{ json: { extraction, extraction_raw_text: raw, extraction_parse_error } }];\n"
+                                     },
+                      "notes":  "Defensively parses the Gemini node\u0027s text output (tries several known output-field shapes) and clamps every field to the enum lists services/call_signal_analyser expects, so a malformed LLM response can never break downstream schema validation."
+                  },
+                  {
+                      "id":  "8d84345b-34ef-44c7-a477-ba773dd86f25",
+                      "name":  "AI Agent Node - Classify and Enrich",
+                      "type":  "@n8n/n8n-nodes-langchain.googleGemini",
+                      "typeVersion":  1.2,
+                      "position":  [
+                                       2800,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "resource":  "text",
+                                         "operation":  "message",
+                                         "modelId":  {
+                                                         "__rl":  true,
+                                                         "mode":  "list",
+                                                         "value":  "models/gemini-2.5-flash",
+                                                         "cachedResultName":  "models/gemini-2.5-flash"
+                                                     },
+                                         "messages":  {
+                                                          "values":  [
+                                                                         {
+                                                                             "content":  "={{ \u0027Transcript:\\n\u0027 + $(\u0027Build Speaker-Tagged Transcript\u0027).item.json.tagged_transcript + \u0027\\n\\nGemini extraction so far:\\n\u0027 + JSON.stringify($json.extraction) }}",
+                                                                             "role":  "user"
+                                                                         }
+                                                                     ]
+                                                      },
+                                         "jsonOutput":  true,
+                                         "options":  {
+                                                         "systemMessage":  "You are the n8n AI Agent Node in the XSight pipeline -- a strictly limited-role step. Your job is ONLY to: (1) classify the submission intent, (2) enrich already-extracted sales fields (normalize/add to them, do not re-extract them from scratch), (3) decide which of two downstream services (rag_service, call_signal_analyser) are relevant for this call -- default to both unless the transcript is clearly unusable, (4) note a decision_maker_present boolean if inferable from the transcript, else false. You must NEVER reason over evidence, generate coaching feedback, recommend actions, reconcile conflicting evidence, or invent information not present in the transcript or the extraction you were given -- those are other components\u0027 jobs. Respond with ONLY one JSON object, no markdown fences, no commentary, matching exactly: {\"submission_intent\": \"short label, e.g. new_call_analysis\", \"decision_maker_present\": true, \"relevant_services\": [\"rag_service\", \"call_signal_analyser\"], \"enriched_call_category\": \"short label\"}.",
+                                                         "temperature":  0.1,
+                                                         "maxOutputTokens":  512
+                                                     }
+                                     },
+                      "notes":  "n8n node 8 -- CLAUDE.md\u0027s limited-role n8n AI Agent Node. Must NOT reason over results, generate coaching feedback, reconcile evidence, or invent information; the prompt is scoped strictly to classify + enrich + decide relevant services. Actual downstream HTTP payload construction happens deterministically in the next Code node, not here.",
+                      "onError":  "continueErrorOutput",
+                      "retryOnFail":  true,
+                      "maxTries":  3,
+                      "waitBetweenTries":  1000
+                  },
+                  {
+                      "id":  "85372ea1-45fb-4233-97d8-4080edb1e5ed",
+                      "name":  "Error - AI Agent Enrichment",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       2800,
+                                       120
+                                   ],
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { _pipeline_error: { stage: \u0027ai_agent_node\u0027, error_code: \u0027ai_agent_enrichment_failed\u0027, http_status: 502, message: \u0027n8n AI Agent Node (classification/enrichment) call failed: \u0027 + (typeof $json.error === \u0027string\u0027 ? $json.error : (($json.error \u0026\u0026 $json.error.message) || \u0027unknown error\u0027)), debug_error: JSON.stringify($json.error || $json) } } }}",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "d02a91fc-cc95-4b91-9d27-ea1e2311af6b",
+                      "name":  "Parse AI Agent Enrichment",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       3040,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "mode":  "runOnceForAllItems",
+                                         "language":  "javaScript",
+                                         "jsCode":  "function extractText(item) {\n  const candidates = [item.text, item.content, item.output, item.response, item.message, item \u0026\u0026 item.candidates \u0026\u0026 item.candidates[0] \u0026\u0026 item.candidates[0].content \u0026\u0026 item.candidates[0].content.parts \u0026\u0026 item.candidates[0].content.parts[0] \u0026\u0026 item.candidates[0].content.parts[0].text];\n  for (const c of candidates) { if (typeof c === \u0027string\u0027 \u0026\u0026 c.trim().length \u003e 0) return c; }\n  return null;\n}\nfunction parseJsonLoose(text) {\n  if (!text) return null;\n  const cleaned = text.replace(/```json/gi, \u0027\u0027).replace(/```/g, \u0027\u0027).trim();\n  try { return JSON.parse(cleaned); } catch (e) {\n    const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n    if (match) { try { return JSON.parse(match[0]); } catch (e2) { return null; } }\n    return null;\n  }\n}\nconst raw = extractText($json);\nlet parsed = parseJsonLoose(raw) || {};\nconst extractionCallCategory = ($(\u0027Parse Gemini Extraction\u0027).item.json.extraction || {}).call_category || \u0027uncategorized\u0027;\nconst enrichment = {\n  submission_intent: typeof parsed.submission_intent === \u0027string\u0027 ? parsed.submission_intent : \u0027new_call_analysis\u0027,\n  decision_maker_present: typeof parsed.decision_maker_present === \u0027boolean\u0027 ? parsed.decision_maker_present : false,\n  relevant_services: (Array.isArray(parsed.relevant_services) \u0026\u0026 parsed.relevant_services.length \u003e 0) ? parsed.relevant_services : [\u0027rag_service\u0027,\u0027call_signal_analyser\u0027],\n  enriched_call_category: typeof parsed.enriched_call_category === \u0027string\u0027 ? parsed.enriched_call_category : extractionCallCategory,\n};\nreturn [{ json: { enrichment, enrichment_raw_text: raw } }];\n"
+                                     }
+                  },
+                  {
+                      "id":  "1f3d54d8-058d-49b9-b903-1278ac7a3bfd",
+                      "name":  "Prepare Downstream Payloads",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       3280,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "mode":  "runOnceForAllItems",
+                                         "language":  "javaScript",
+                                         "jsCode":  "const extractionNode = ($(\u0027Parse Gemini Extraction\u0027).item.json.extraction) || {};\nconst transcriptNode = $(\u0027Build Speaker-Tagged Transcript\u0027).item.json;\nconst enrichment = $json.enrichment || {};\n\nconst measured = transcriptNode.audio_features_for_signal_service;\n\nconst ragPayload = {\n  transcript: transcriptNode.tagged_transcript,\n  metadata: {\n    agent_name: transcriptNode.submission_metadata.agent_name || undefined,\n    call_duration_seconds: measured.call_duration_seconds,\n  },\n  top_k: 3,\n  filters: { main_objection: extractionNode.main_objection },\n};\n\nconst signalPayload = {\n  transcript: transcriptNode.tagged_transcript,\n  audio_features: {\n    call_duration_seconds: measured.call_duration_seconds,\n    silence_ratio: measured.silence_ratio,\n    speaking_rate_wpm: measured.speaking_rate_wpm,\n    speech_to_non_speech_ratio: measured.speech_to_non_speech_ratio,\n    agent_talk_ratio: measured.agent_talk_ratio,\n  },\n  structured_fields: {\n    customer_intent: extractionNode.customer_intent,\n    main_objection: extractionNode.main_objection,\n    customer_sentiment: extractionNode.customer_sentiment,\n    closing_attempt: extractionNode.closing_attempt,\n    decision_maker_present: enrichment.decision_maker_present,\n  },\n};\n\nreturn [{ json: { rag_payload: ragPayload, signal_payload: signalPayload, relevant_services: enrichment.relevant_services } }];\n"
+                                     },
+                      "notes":  "Deterministic payload construction (not the LLM\u0027s job) -- exact request shapes per docs/api_contracts.md sections 1 and 2. sale_result is intentionally omitted from the RAG metadata since it is unknown at this point in the pipeline (Ground Truth Rules: never fabricate)."
+                  },
+                  {
+                      "id":  "10c063a7-fd22-4434-95c0-5a48d3fb9166",
+                      "name":  "HTTP Request - RAG Service",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.4,
+                      "position":  [
+                                       3560,
+                                       -950
+                                   ],
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "={{ $env.RAG_SERVICE_URL }}/query",
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={{ $json.rag_payload }}",
+                                         "options":  {
+                                                         "timeout":  15000
+                                                     }
+                                     },
+                      "notes":  "n8n node 9. POST /query per docs/api_contracts.md section 1. Requires RAG_SERVICE_URL env var reachable from n8n (see n8n/SETUP.md).",
+                      "onError":  "continueErrorOutput",
+                      "retryOnFail":  true,
+                      "maxTries":  3,
+                      "waitBetweenTries":  1000
+                  },
+                  {
+                      "id":  "0c720779-79d2-470d-8839-3a5a52b1ce6b",
+                      "name":  "Prepare RAG For Merge",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       3800,
+                                       -950
+                                   ],
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { rag: $json } }}",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "d0ed9fc7-8050-45fa-91f4-3267ffbbe5d5",
+                      "name":  "Error - RAG Service",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       3560,
+                                       120
+                                   ],
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { _pipeline_error: { stage: \u0027rag_service\u0027, error_code: \u0027rag_service_unreachable\u0027, http_status: 502, message: \u0027RAG Service (POST /query) call failed: \u0027 + (typeof $json.error === \u0027string\u0027 ? $json.error : (($json.error \u0026\u0026 $json.error.message) || \u0027unknown error\u0027)), debug_error: JSON.stringify($json.error || $json) } } }}",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "69e908a7-4aad-4cd5-8cb9-c4b2b125b416",
+                      "name":  "HTTP Request - Call Signal Analyser",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.4,
+                      "position":  [
+                                       3560,
+                                       -550
+                                   ],
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "={{ $env.CALL_SIGNAL_ANALYSER_URL }}/analyse-call",
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={{ $json.signal_payload }}",
+                                         "options":  {
+                                                         "timeout":  15000
+                                                     }
+                                     },
+                      "notes":  "n8n node 10. POST /analyse-call per docs/api_contracts.md section 2. Requires CALL_SIGNAL_ANALYSER_URL env var. Note: audio_features sent here are clamped into the mock service\u0027s narrow synthetic-dataset ranges (e.g. call_duration_seconds 180-900s) -- a documented limitation, not a grounded transformation, see clamped_fields upstream and n8n/README.md.",
+                      "onError":  "continueErrorOutput",
+                      "retryOnFail":  true,
+                      "maxTries":  3,
+                      "waitBetweenTries":  1000
+                  },
+                  {
+                      "id":  "2a8276c8-0742-4b4a-830a-5fdf8d1fe87a",
+                      "name":  "Prepare Signal For Merge",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       3800,
+                                       -550
+                                   ],
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { signal: $json } }}",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "6792efeb-21f3-49d9-931c-49920f97fd2b",
+                      "name":  "Error - Call Signal Analyser",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       3560,
+                                       280
+                                   ],
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { _pipeline_error: { stage: \u0027call_signal_analyser\u0027, error_code: \u0027call_signal_analyser_unreachable\u0027, http_status: 502, message: \u0027Call Signal Analyser (POST /analyse-call) call failed: \u0027 + (typeof $json.error === \u0027string\u0027 ? $json.error : (($json.error \u0026\u0026 $json.error.message) || \u0027unknown error\u0027)), debug_error: JSON.stringify($json.error || $json) } } }}",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "b8910f8a-872e-4943-a9fc-252a1e927bae",
+                      "name":  "Merge RAG and Signal Results",
+                      "type":  "n8n-nodes-base.merge",
+                      "typeVersion":  3.2,
+                      "position":  [
+                                       4040,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "mode":  "combine",
+                                         "combineBy":  "combineByPosition",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "notes":  "n8n node 11. Waits for both the RAG Service and Call Signal Analyser branches before LangGraph runs."
+                  },
+                  {
+                      "id":  "758eab14-4b65-4e9d-b9a8-96c4b2ffe5c8",
+                      "name":  "Prepare LangGraph Payload",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       4280,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "mode":  "runOnceForAllItems",
+                                         "language":  "javaScript",
+                                         "jsCode":  "const merged = $json;\nconst extraction = ($(\u0027Parse Gemini Extraction\u0027).item.json.extraction) || {};\nconst transcriptNode = $(\u0027Build Speaker-Tagged Transcript\u0027).item.json;\n\nreturn [{\n  json: {\n    question: \u0027Why did this call succeed or fail, and what coaching or follow-up does the agent need?\u0027,\n    transcript: transcriptNode.tagged_transcript,\n    metadata: transcriptNode.submission_metadata,\n    structured_extraction: extraction,\n    rag_results: {\n      similar_calls: (merged.rag \u0026\u0026 merged.rag.similar_calls) || [],\n      insight: (merged.rag \u0026\u0026 merged.rag.insight) || \u0027\u0027,\n      citations: (merged.rag \u0026\u0026 merged.rag.citations) || [],\n    },\n    signal_analysis: merged.signal || {},\n    _merged_for_router: merged,\n  }\n}];\n"
+                                     }
+                  },
+                  {
+                      "id":  "50985ccb-b8e1-489f-ab5e-cbeffb5b6a7b",
+                      "name":  "HTTP Request - LangGraph Agent",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.4,
+                      "position":  [
+                                       4520,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "={{ $env.LANGGRAPH_AGENT_URL }}/agent/run",
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={{ { question: $json.question, transcript: $json.transcript, metadata: $json.metadata, structured_extraction: $json.structured_extraction, rag_results: $json.rag_results, signal_analysis: $json.signal_analysis } }}",
+                                         "options":  {
+                                                         "timeout":  20000
+                                                     }
+                                     },
+                      "notes":  "n8n node 12. POST /agent/run per docs/api_contracts.md section 4. Requires LANGGRAPH_AGENT_URL env var. LangGraph does not call RAG/Signal Analyser itself -- n8n already fetched both and passes them in here.",
+                      "onError":  "continueErrorOutput",
+                      "retryOnFail":  true,
+                      "maxTries":  3,
+                      "waitBetweenTries":  1000
+                  },
+                  {
+                      "id":  "ff2f09cb-c263-4dad-9ba5-2b87a2c379ec",
+                      "name":  "Error - LangGraph Agent",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       4520,
+                                       120
+                                   ],
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { _pipeline_error: { stage: \u0027langgraph_agent\u0027, error_code: \u0027langgraph_agent_unreachable\u0027, http_status: 502, message: \u0027LangGraph Agent (POST /agent/run) call failed: \u0027 + (typeof $json.error === \u0027string\u0027 ? $json.error : (($json.error \u0026\u0026 $json.error.message) || \u0027unknown error\u0027)), debug_error: JSON.stringify($json.error || $json) } } }}",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "debfb5fa-c187-480c-92a8-10c590f21aa0",
+                      "name":  "Assemble Final Analysis Context",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       4760,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "mode":  "runOnceForAllItems",
+                                         "language":  "javaScript",
+                                         "jsCode":  "const langgraph = $json;\nconst merged = $(\u0027Prepare LangGraph Payload\u0027).item.json._merged_for_router || {};\nconst extraction = ($(\u0027Parse Gemini Extraction\u0027).item.json.extraction) || {};\nconst enrichment = ($(\u0027Parse AI Agent Enrichment\u0027).item.json.enrichment) || {};\nconst transcriptNode = $(\u0027Build Speaker-Tagged Transcript\u0027).item.json;\n\nreturn [{\n  json: {\n    tagged_transcript: transcriptNode.tagged_transcript,\n    submission_metadata: transcriptNode.submission_metadata,\n    extraction,\n    enrichment,\n    rag_results: merged.rag || {},\n    signal_analysis: merged.signal || {},\n    langgraph_reasoning: langgraph,\n    clamped_fields: transcriptNode.clamped_fields,\n    pipeline_assumptions: transcriptNode.pipeline_assumptions,\n  }\n}];\n"
+                                     }
+                  },
+                  {
+                      "id":  "d8f07d77-f7f6-4f4a-b81a-587307ad9ba2",
+                      "name":  "Gemini Final Analysis Chain",
+                      "type":  "@n8n/n8n-nodes-langchain.googleGemini",
+                      "typeVersion":  1.2,
+                      "position":  [
+                                       5000,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "resource":  "text",
+                                         "operation":  "message",
+                                         "modelId":  {
+                                                         "__rl":  true,
+                                                         "mode":  "list",
+                                                         "value":  "models/gemini-2.5-flash",
+                                                         "cachedResultName":  "models/gemini-2.5-flash"
+                                                     },
+                                         "messages":  {
+                                                          "values":  [
+                                                                         {
+                                                                             "content":  "={{ \u0027EVIDENCE PACKAGE (JSON):\\n\u0027 + JSON.stringify($json) }}",
+                                                                             "role":  "user"
+                                                                         }
+                                                                     ]
+                                                      },
+                                         "jsonOutput":  true,
+                                         "options":  {
+                                                         "systemMessage":  "You are the XSight Gemini Final Analysis LLM Chain. You assemble the single complete final output for a sales call analysis, using ONLY the evidence given to you below: the validated transcript, the structured extraction, the AI Agent Node\u0027s enrichment, the RAG Service\u0027s retrieved historical calls (each already cited by call_id), the Call Signal Analyser\u0027s scores, and the LangGraph Agent\u0027s reasoning output. You must NEVER invent CRM facts, budgets, customer names, dates, or outcomes that are not present in what you were given. Every claim about a historical call must cite its call_id exactly as given in rag_results.citations -- never invent a call_id and never state a historical fact without one. If the evidence given to you is insufficient for a confident claim, say so plainly in the relevant field rather than guessing. Fill the \u0027limitations\u0027 field honestly, including any gaps you notice in the evidence (e.g. low confidence, no similar calls found, conflicting signals). Respond with ONLY one JSON object, no markdown fences, no commentary, matching EXACTLY this schema (all fields required): {\"transcript\": \"string (the full speaker-tagged transcript, copy it through unchanged)\", \"call_summary\": \"string, 2-4 sentences, grounded only in the transcript\", \"customer_intent\": \"string\", \"main_objection\": \"string\", \"customer_sentiment\": \"positive|neutral|negative\", \"call_outcome\": \"Sale|No Sale|Follow-up Needed|Uncertain\", \"agent_performance_score\": 3, \"lead_quality_score\": 3, \"similar_calls\": [{\"call_id\": \"string\", \"agent_name\": \"string\", \"sale_result\": \"string\", \"main_objection\": \"string\", \"similarity_score\": 0.8, \"reason\": \"string\"}], \"coaching_feedback\": [\"string\"], \"recommended_next_action\": \"string\", \"suggested_follow_up_email\": \"string, a short draft email\", \"routing_category\": \"a short business category label\", \"confidence\": 0.8, \"risk_level\": \"Low|Medium|High\", \"detected_signals\": [\"string\"], \"limitations\": \"string, honest, may be multiple sentences\"}. Do not include a guardrail_status field -- that is assigned deterministically by the workflow after you respond, not by you.",
+                                                         "temperature":  0.3,
+                                                         "maxOutputTokens":  2048
+                                                     }
+                                     },
+                      "notes":  "n8n node 13. Assembles the complete final output JSON per CLAUDE.md\u0027s schema, grounded in the extraction + RAG + signal analysis + LangGraph reasoning only. Reuses the same \u0027Gemini API - XSight\u0027 credential as the two earlier Gemini nodes.",
+                      "onError":  "continueErrorOutput",
+                      "retryOnFail":  true,
+                      "maxTries":  3,
+                      "waitBetweenTries":  1000
+                  },
+                  {
+                      "id":  "e6305e6a-4eaf-45d0-895c-ede6ff74b4b7",
+                      "name":  "Error - Final Analysis",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       5000,
+                                       120
+                                   ],
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ { _pipeline_error: { stage: \u0027gemini_final_analysis_chain\u0027, error_code: \u0027final_analysis_failed\u0027, http_status: 502, message: \u0027Gemini Final Analysis LLM Chain call failed: \u0027 + (typeof $json.error === \u0027string\u0027 ? $json.error : (($json.error \u0026\u0026 $json.error.message) || \u0027unknown error\u0027)), debug_error: JSON.stringify($json.error || $json) } } }}",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "0d3687c2-368f-4418-8f21-b0945eee8d23",
+                      "name":  "Parse Final Analysis Output",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       5240,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "mode":  "runOnceForAllItems",
+                                         "language":  "javaScript",
+                                         "jsCode":  "function extractText(item) {\n  const candidates = [item.text, item.content, item.output, item.response, item.message, item \u0026\u0026 item.candidates \u0026\u0026 item.candidates[0] \u0026\u0026 item.candidates[0].content \u0026\u0026 item.candidates[0].content.parts \u0026\u0026 item.candidates[0].content.parts[0] \u0026\u0026 item.candidates[0].content.parts[0].text];\n  for (const c of candidates) { if (typeof c === \u0027string\u0027 \u0026\u0026 c.trim().length \u003e 0) return c; }\n  return null;\n}\nfunction parseJsonLoose(text) {\n  if (!text) return null;\n  const cleaned = text.replace(/```json/gi, \u0027\u0027).replace(/```/g, \u0027\u0027).trim();\n  try { return JSON.parse(cleaned); } catch (e) {\n    const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n    if (match) { try { return JSON.parse(match[0]); } catch (e2) { return null; } }\n    return null;\n  }\n}\nconst raw = extractText($json);\nlet parsed = parseJsonLoose(raw);\nlet parse_error = null;\nif (!parsed || typeof parsed !== \u0027object\u0027) { parse_error = \u0027final_analysis_response_not_valid_json\u0027; parsed = {}; }\n\nconst ctx = $(\u0027Assemble Final Analysis Context\u0027).item.json;\n\nconst knownGaps = [];\nknownGaps.push(\u0027Post-transcription content guardrails were enforced by an inline n8n deterministic check, not the guardrails_service (its POST /check/input does not yet implement a post_transcription stage).\u0027);\nknownGaps.push(\u0027Output guardrails (POST /check/output) are not implemented by guardrails_service yet; this result has not been independently checked for invented facts or missing citations by that service.\u0027);\nif (ctx.clamped_fields \u0026\u0026 ctx.clamped_fields.length \u003e 0) {\n  knownGaps.push(\u0027Audio-derived features (\u0027 + ctx.clamped_fields.map(c =\u003e c.field).join(\u0027, \u0027) + \u0027) were clamped to the Call Signal Analyser mock service accepted numeric ranges and may not reflect this call true measured values.\u0027);\n}\nif (ctx.pipeline_assumptions \u0026\u0026 ctx.pipeline_assumptions.length \u003e 0) {\n  ctx.pipeline_assumptions.forEach(a =\u003e knownGaps.push(a));\n}\nif (parse_error) {\n  knownGaps.push(\u0027The Final Analysis Chain response could not be parsed as JSON; default/fallback values were substituted for missing fields.\u0027);\n}\n\nconst geminiLimitations = (typeof parsed.limitations === \u0027string\u0027 \u0026\u0026 parsed.limitations.trim()) ? parsed.limitations.trim() : \u0027\u0027;\nconst finalLimitations = [geminiLimitations].concat(knownGaps).filter(Boolean).join(\u0027 \u0027);\n\nconst finalAnalysis = {\n  transcript: typeof parsed.transcript === \u0027string\u0027 ? parsed.transcript : ctx.tagged_transcript,\n  call_summary: typeof parsed.call_summary === \u0027string\u0027 ? parsed.call_summary : \u0027Summary unavailable -- Final Analysis Chain response could not be parsed.\u0027,\n  customer_intent: parsed.customer_intent || ctx.extraction.customer_intent,\n  main_objection: parsed.main_objection || ctx.extraction.main_objection,\n  customer_sentiment: [\u0027positive\u0027,\u0027neutral\u0027,\u0027negative\u0027].includes(parsed.customer_sentiment) ? parsed.customer_sentiment : (ctx.extraction.customer_sentiment === \u0027mixed\u0027 ? \u0027neutral\u0027 : ctx.extraction.customer_sentiment),\n  call_outcome: [\u0027Sale\u0027,\u0027No Sale\u0027,\u0027Follow-up Needed\u0027,\u0027Uncertain\u0027].includes(parsed.call_outcome) ? parsed.call_outcome : ((ctx.signal_analysis \u0026\u0026 ctx.signal_analysis.predicted_outcome) || \u0027Uncertain\u0027),\n  agent_performance_score: Number.isInteger(parsed.agent_performance_score) ? parsed.agent_performance_score : ((ctx.signal_analysis \u0026\u0026 ctx.signal_analysis.agent_performance_score) || 3),\n  lead_quality_score: Number.isInteger(parsed.lead_quality_score) ? parsed.lead_quality_score : ((ctx.signal_analysis \u0026\u0026 ctx.signal_analysis.lead_quality_score) || 3),\n  similar_calls: Array.isArray(parsed.similar_calls) ? parsed.similar_calls : ((ctx.rag_results \u0026\u0026 ctx.rag_results.similar_calls) || []),\n  coaching_feedback: (Array.isArray(parsed.coaching_feedback) \u0026\u0026 parsed.coaching_feedback.length \u003e 0) ? parsed.coaching_feedback : ((ctx.langgraph_reasoning \u0026\u0026 ctx.langgraph_reasoning.coaching_points) || []),\n  recommended_next_action: typeof parsed.recommended_next_action === \u0027string\u0027 ? parsed.recommended_next_action : ((ctx.langgraph_reasoning \u0026\u0026 ctx.langgraph_reasoning.recommended_next_action) || \u0027Manual follow-up recommended -- Final Analysis Chain output unavailable.\u0027),\n  suggested_follow_up_email: typeof parsed.suggested_follow_up_email === \u0027string\u0027 ? parsed.suggested_follow_up_email : \u0027\u0027,\n  routing_category: typeof parsed.routing_category === \u0027string\u0027 ? parsed.routing_category : ((ctx.enrichment \u0026\u0026 ctx.enrichment.enriched_call_category) || \u0027uncategorized\u0027),\n  confidence: typeof parsed.confidence === \u0027number\u0027 ? parsed.confidence : ((ctx.signal_analysis \u0026\u0026 ctx.signal_analysis.confidence) || 0),\n  risk_level: [\u0027Low\u0027,\u0027Medium\u0027,\u0027High\u0027].includes(parsed.risk_level) ? parsed.risk_level : ((ctx.signal_analysis \u0026\u0026 ctx.signal_analysis.risk_level) || \u0027Medium\u0027),\n  detected_signals: Array.isArray(parsed.detected_signals) ? parsed.detected_signals : ((ctx.signal_analysis \u0026\u0026 ctx.signal_analysis.detected_signals) || []),\n  limitations: finalLimitations,\n};\n\nreturn [{ json: { final_analysis: finalAnalysis, rag_results: ctx.rag_results, signal_analysis: ctx.signal_analysis, langgraph_reasoning: ctx.langgraph_reasoning, final_analysis_parse_error: parse_error } }];\n"
+                                     },
+                      "notes":  "Always appends the pipeline\u0027s own known limitations (post-transcription guardrails inline check, output guardrails not implemented, clamped audio features, speaker-mapping heuristic) to whatever Gemini wrote in \u0027limitations\u0027, so the field stays honest even if the model omits something."
+                  },
+                  {
+                      "id":  "e424911c-c3ee-42b0-8770-a325435c7820",
+                      "name":  "Router - Confidence and Category",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       5480,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "mode":  "runOnceForAllItems",
+                                         "language":  "javaScript",
+                                         "jsCode":  "const analysis = $json.final_analysis;\nconst signal = $json.signal_analysis || {};\nconst langgraph = $json.langgraph_reasoning || {};\nconst rag = $json.rag_results || {};\n\nconst routerReasons = [];\nlet guardrailStatus = \u0027pass\u0027;\n\nconst confidence = typeof signal.confidence === \u0027number\u0027 ? signal.confidence : analysis.confidence;\nif (typeof confidence !== \u0027number\u0027 || confidence \u003c 0.65) {\n  routerReasons.push(\u0027call_signal_analyser_confidence_below_0.65\u0027);\n  guardrailStatus = \u0027human_review_required\u0027;\n}\n\nconst conflicts = Array.isArray(langgraph.evidence_conflicts) ? langgraph.evidence_conflicts : [];\nif (conflicts.length \u003e 0) {\n  routerReasons.push(\u0027langgraph_evidence_conflicts_detected\u0027);\n  guardrailStatus = \u0027human_review_required\u0027;\n}\n\nconst claimsHistoricalCalls = Array.isArray(analysis.similar_calls) \u0026\u0026 analysis.similar_calls.length \u003e 0;\nconst hasCitations = Array.isArray(rag.citations) \u0026\u0026 rag.citations.length \u003e 0;\nif (claimsHistoricalCalls \u0026\u0026 !hasCitations) {\n  routerReasons.push(\u0027missing_historical_call_citations\u0027);\n  guardrailStatus = \u0027human_review_required\u0027;\n}\n\nif ($json.final_analysis_parse_error) {\n  routerReasons.push(\u0027final_analysis_response_not_parseable\u0027);\n  guardrailStatus = \u0027human_review_required\u0027;\n}\n\nrouterReasons.push(\u0027output_guardrails_not_implemented_skipped_check\u0027);\n\nconst finalOutput = Object.assign({}, analysis, { guardrail_status: guardrailStatus });\nif (guardrailStatus === \u0027human_review_required\u0027 \u0026\u0026 (!finalOutput.routing_category || finalOutput.routing_category === \u0027uncategorized\u0027)) {\n  finalOutput.routing_category = \u0027human_review_required\u0027;\n}\n\nreturn [{ json: { final_output: finalOutput, router_reasons: routerReasons } }];\n"
+                                     },
+                      "notes":  "n8n node 15. Implements CLAUDE.md\u0027s exact routing rule: confidence \u003c 0.65 OR evidence_conflicts non-empty OR missing citations OR unparseable final analysis -\u003e human_review_required. Output guardrails cannot be checked (not implemented) -- this is recorded in router_reasons, not silently ignored."
+                  },
+                  {
+                      "id":  "7fe33ab9-358f-4297-a23e-f23de594dd90",
+                      "name":  "Build Success Response - Full Analysis",
+                      "type":  "n8n-nodes-base.set",
+                      "typeVersion":  3.4,
+                      "position":  [
+                                       5720,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "mode":  "raw",
+                                         "jsonOutput":  "={{ $json.final_output }}",
+                                         "options":  {
+
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "615d9228-d8ae-469f-a2ab-6a81911aeaa1",
+                      "name":  "Respond - Full Analysis",
+                      "type":  "n8n-nodes-base.respondToWebhook",
+                      "typeVersion":  1.5,
+                      "position":  [
+                                       5960,
+                                       -750
+                                   ],
+                      "parameters":  {
+                                         "respondWith":  "json",
+                                         "responseBody":  "={{ $json }}",
+                                         "options":  {
+                                                         "responseCode":  200
+                                                     }
+                                     }
+                  },
+                  {
+                      "id":  "5ac12cfc-415b-4888-975e-6aee64c1f5f2",
+                      "name":  "Build Pipeline Error Response",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       4000,
+                                       700
+                                   ],
+                      "parameters":  {
+                                         "mode":  "runOnceForAllItems",
+                                         "language":  "javaScript",
+                                         "jsCode":  "const e = $json._pipeline_error || {};\nlet startedAt = null;\ntry { startedAt = $(\u0027Capture Start Time\u0027).item.json.started_at_ms; } catch (err) { startedAt = null; }\nreturn [{\n  json: {\n    http_status: e.http_status || 500,\n    response: {\n      status: \u0027error\u0027,\n      stage: e.stage || \u0027pipeline\u0027,\n      error_code: e.error_code || \u0027pipeline_error\u0027,\n      message: e.message || \u0027An error occurred later in the analysis pipeline.\u0027,\n      processing_time_ms: startedAt ? ($now.toMillis() - startedAt) : null,\n      workflow_version: \u0027phase9-16-full-pipeline\u0027\n    },\n    debug_error: e.debug_error || e.message || \u0027unknown\u0027\n  }\n}];\n"
+                                     },
+                      "notes":  "Shared terminal error builder for every new failure branch (nodes 5-15). Fans in from Error - Content Guardrails / Error - Gemini Extraction / Error - AI Agent Enrichment / Error - RAG Service / Error - Call Signal Analyser / Error - LangGraph Agent / Error - Final Analysis, then feeds the existing \u0027Respond Error\u0027 node."
+                  }
+              ],
+    "connections":  {
+                        "Prepare Guardrails Payload":  {
+                                                           "main":  [
+                                                                        [
+                                                                            {
+                                                                                "node":  "HTTP Request - Pre-Transcription Guardrails",
+                                                                                "type":  "main",
+                                                                                "index":  0
+                                                                            }
+                                                                        ]
+                                                                    ]
+                                                       },
+                        "HTTP Request - Pre-Transcription Guardrails":  {
+                                                                            "main":  [
+                                                                                         [
+                                                                                             {
+                                                                                                 "node":  "IF - Guardrails Passed",
+                                                                                                 "type":  "main",
+                                                                                                 "index":  0
+                                                                                             }
+                                                                                         ],
+                                                                                         [
+                                                                                             {
+                                                                                                 "node":  "Build Error Response",
+                                                                                                 "type":  "main",
+                                                                                                 "index":  0
+                                                                                             }
+                                                                                         ]
+                                                                                     ]
+                                                                        },
+                        "IF - Guardrails Passed":  {
+                                                       "main":  [
+                                                                    [
+                                                                        {
+                                                                            "node":  "Reattach Audio Binary",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ],
+                                                                    [
+                                                                        {
+                                                                            "node":  "Build Error Response",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ]
+                                                                ]
+                                                   },
+                        "Capture Start Time":  {
+                                                   "main":  [
+                                                                [
+                                                                    {
+                                                                        "node":  "Prepare Guardrails Payload",
+                                                                        "type":  "main",
+                                                                        "index":  0
+                                                                    }
+                                                                ]
+                                                            ]
+                                               },
+                        "Webhook Trigger":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "Normalize Binary Input",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "Normalize Binary Input":  {
+                                                       "main":  [
+                                                                    [
+                                                                        {
+                                                                            "node":  "Capture Start Time",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ],
+                                                                    [
+                                                                        {
+                                                                            "node":  "Build Error Response",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ]
+                                                                ]
+                                                   },
+                        "Reattach Audio Binary":  {
+                                                      "main":  [
+                                                                   [
+                                                                       {
+                                                                           "node":  "Upload Audio to AssemblyAI",
+                                                                           "type":  "main",
+                                                                           "index":  0
+                                                                       }
+                                                                   ]
+                                                               ]
+                                                  },
+                        "Upload Audio to AssemblyAI":  {
+                                                           "main":  [
+                                                                        [
+                                                                            {
+                                                                                "node":  "Submit Transcription Job",
+                                                                                "type":  "main",
+                                                                                "index":  0
+                                                                            }
+                                                                        ],
+                                                                        [
+                                                                            {
+                                                                                "node":  "Build Error Response",
+                                                                                "type":  "main",
+                                                                                "index":  0
+                                                                            }
+                                                                        ]
+                                                                    ]
+                                                       },
+                        "Submit Transcription Job":  {
+                                                         "main":  [
+                                                                      [
+                                                                          {
+                                                                              "node":  "Initialize Polling",
+                                                                              "type":  "main",
+                                                                              "index":  0
+                                                                          }
+                                                                      ],
+                                                                      [
+                                                                          {
+                                                                              "node":  "Build Error Response",
+                                                                              "type":  "main",
+                                                                              "index":  0
+                                                                          }
+                                                                      ]
+                                                                  ]
+                                                     },
+                        "Wait - Poll Interval":  {
+                                                     "main":  [
+                                                                  [
+                                                                      {
+                                                                          "node":  "Poll AssemblyAI Transcript Status",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ]
+                                                              ]
+                                                 },
+                        "IF - Max Polling Time Reached":  {
+                                                              "main":  [
+                                                                           [
+                                                                               {
+                                                                                   "node":  "Build Error Response",
+                                                                                   "type":  "main",
+                                                                                   "index":  0
+                                                                               }
+                                                                           ],
+                                                                           [
+                                                                               {
+                                                                                   "node":  "Wait - Poll Interval",
+                                                                                   "type":  "main",
+                                                                                   "index":  0
+                                                                               }
+                                                                           ]
+                                                                       ]
+                                                          },
+                        "Poll AssemblyAI Transcript Status":  {
+                                                                  "main":  [
+                                                                               [
+                                                                                   {
+                                                                                       "node":  "Switch - Transcript Status",
+                                                                                       "type":  "main",
+                                                                                       "index":  0
+                                                                                   }
+                                                                               ],
+                                                                               [
+                                                                                   {
+                                                                                       "node":  "Build Error Response",
+                                                                                       "type":  "main",
+                                                                                       "index":  0
+                                                                                   }
+                                                                               ]
+                                                                           ]
+                                                              },
+                        "Switch - Transcript Status":  {
+                                                           "main":  [
+                                                                        [
+                                                                            {
+                                                                                "node":  "Normalize Transcript",
+                                                                                "type":  "main",
+                                                                                "index":  0
+                                                                            }
+                                                                        ],
+                                                                        [
+                                                                            {
+                                                                                "node":  "Build Error Response",
+                                                                                "type":  "main",
+                                                                                "index":  0
+                                                                            }
+                                                                        ],
+                                                                        [
+                                                                            {
+                                                                                "node":  "IF - Max Polling Time Reached",
+                                                                                "type":  "main",
+                                                                                "index":  0
+                                                                            }
+                                                                        ],
+                                                                        [
+                                                                            {
+                                                                                "node":  "Build Error Response",
+                                                                                "type":  "main",
+                                                                                "index":  0
+                                                                            }
+                                                                        ]
+                                                                    ]
+                                                       },
+                        "Normalize Transcript":  {
+                                                     "main":  [
+                                                                  [
+                                                                      {
+                                                                          "node":  "Build Speaker-Tagged Transcript",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ],
+                                                                  [
+                                                                      {
+                                                                          "node":  "Build Error Response",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ]
+                                                              ]
+                                                 },
+                        "Build Error Response":  {
+                                                     "main":  [
+                                                                  [
+                                                                      {
+                                                                          "node":  "Respond Error",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ]
+                                                              ]
+                                                 },
+                        "Initialize Polling":  {
+                                                   "main":  [
+                                                                [
+                                                                    {
+                                                                        "node":  "Wait - Poll Interval",
+                                                                        "type":  "main",
+                                                                        "index":  0
+                                                                    }
+                                                                ]
+                                                            ]
+                                               },
+                        "Build Speaker-Tagged Transcript":  {
+                                                                "main":  [
+                                                                             [
+                                                                                 {
+                                                                                     "node":  "Post-Transcription Content Check",
+                                                                                     "type":  "main",
+                                                                                     "index":  0
+                                                                                 }
+                                                                             ]
+                                                                         ]
+                                                            },
+                        "Post-Transcription Content Check":  {
+                                                                 "main":  [
+                                                                              [
+                                                                                  {
+                                                                                      "node":  "IF - Content Guardrails Passed",
+                                                                                      "type":  "main",
+                                                                                      "index":  0
+                                                                                  }
+                                                                              ]
+                                                                          ]
+                                                             },
+                        "IF - Content Guardrails Passed":  {
+                                                               "main":  [
+                                                                            [
+                                                                                {
+                                                                                    "node":  "Gemini Information Extractor",
+                                                                                    "type":  "main",
+                                                                                    "index":  0
+                                                                                }
+                                                                            ],
+                                                                            [
+                                                                                {
+                                                                                    "node":  "Error - Content Guardrails",
+                                                                                    "type":  "main",
+                                                                                    "index":  0
+                                                                                }
+                                                                            ]
+                                                                        ]
+                                                           },
+                        "Error - Content Guardrails":  {
+                                                           "main":  [
+                                                                        [
+                                                                            {
+                                                                                "node":  "Build Pipeline Error Response",
+                                                                                "type":  "main",
+                                                                                "index":  0
+                                                                            }
+                                                                        ]
+                                                                    ]
+                                                       },
+                        "Gemini Information Extractor":  {
+                                                             "main":  [
+                                                                          [
+                                                                              {
+                                                                                  "node":  "Parse Gemini Extraction",
+                                                                                  "type":  "main",
+                                                                                  "index":  0
+                                                                              }
+                                                                          ],
+                                                                          [
+                                                                              {
+                                                                                  "node":  "Error - Gemini Extraction",
+                                                                                  "type":  "main",
+                                                                                  "index":  0
+                                                                              }
+                                                                          ]
+                                                                      ]
+                                                         },
+                        "Error - Gemini Extraction":  {
+                                                          "main":  [
+                                                                       [
+                                                                           {
+                                                                               "node":  "Build Pipeline Error Response",
+                                                                               "type":  "main",
+                                                                               "index":  0
+                                                                           }
+                                                                       ]
+                                                                   ]
+                                                      },
+                        "Parse Gemini Extraction":  {
+                                                        "main":  [
+                                                                     [
+                                                                         {
+                                                                             "node":  "AI Agent Node - Classify and Enrich",
+                                                                             "type":  "main",
+                                                                             "index":  0
+                                                                         }
+                                                                     ]
+                                                                 ]
+                                                    },
+                        "AI Agent Node - Classify and Enrich":  {
+                                                                    "main":  [
+                                                                                 [
+                                                                                     {
+                                                                                         "node":  "Parse AI Agent Enrichment",
+                                                                                         "type":  "main",
+                                                                                         "index":  0
+                                                                                     }
+                                                                                 ],
+                                                                                 [
+                                                                                     {
+                                                                                         "node":  "Error - AI Agent Enrichment",
+                                                                                         "type":  "main",
+                                                                                         "index":  0
+                                                                                     }
+                                                                                 ]
+                                                                             ]
+                                                                },
+                        "Error - AI Agent Enrichment":  {
+                                                            "main":  [
+                                                                         [
+                                                                             {
+                                                                                 "node":  "Build Pipeline Error Response",
+                                                                                 "type":  "main",
+                                                                                 "index":  0
+                                                                             }
+                                                                         ]
+                                                                     ]
+                                                        },
+                        "Parse AI Agent Enrichment":  {
+                                                          "main":  [
+                                                                       [
+                                                                           {
+                                                                               "node":  "Prepare Downstream Payloads",
+                                                                               "type":  "main",
+                                                                               "index":  0
+                                                                           }
+                                                                       ]
+                                                                   ]
+                                                      },
+                        "Prepare Downstream Payloads":  {
+                                                            "main":  [
+                                                                         [
+                                                                             {
+                                                                                 "node":  "HTTP Request - RAG Service",
+                                                                                 "type":  "main",
+                                                                                 "index":  0
+                                                                             },
+                                                                             {
+                                                                                 "node":  "HTTP Request - Call Signal Analyser",
+                                                                                 "type":  "main",
+                                                                                 "index":  0
+                                                                             }
+                                                                         ]
+                                                                     ]
+                                                        },
+                        "HTTP Request - RAG Service":  {
+                                                           "main":  [
+                                                                        [
+                                                                            {
+                                                                                "node":  "Prepare RAG For Merge",
+                                                                                "type":  "main",
+                                                                                "index":  0
+                                                                            }
+                                                                        ],
+                                                                        [
+                                                                            {
+                                                                                "node":  "Error - RAG Service",
+                                                                                "type":  "main",
+                                                                                "index":  0
+                                                                            }
+                                                                        ]
+                                                                    ]
+                                                       },
+                        "Error - RAG Service":  {
+                                                    "main":  [
+                                                                 [
+                                                                     {
+                                                                         "node":  "Build Pipeline Error Response",
+                                                                         "type":  "main",
+                                                                         "index":  0
+                                                                     }
+                                                                 ]
+                                                             ]
+                                                },
+                        "HTTP Request - Call Signal Analyser":  {
+                                                                    "main":  [
+                                                                                 [
+                                                                                     {
+                                                                                         "node":  "Prepare Signal For Merge",
+                                                                                         "type":  "main",
+                                                                                         "index":  0
+                                                                                     }
+                                                                                 ],
+                                                                                 [
+                                                                                     {
+                                                                                         "node":  "Error - Call Signal Analyser",
+                                                                                         "type":  "main",
+                                                                                         "index":  0
+                                                                                     }
+                                                                                 ]
+                                                                             ]
+                                                                },
+                        "Error - Call Signal Analyser":  {
+                                                             "main":  [
+                                                                          [
+                                                                              {
+                                                                                  "node":  "Build Pipeline Error Response",
+                                                                                  "type":  "main",
+                                                                                  "index":  0
+                                                                              }
+                                                                          ]
+                                                                      ]
+                                                         },
+                        "Prepare RAG For Merge":  {
+                                                      "main":  [
+                                                                   [
+                                                                       {
+                                                                           "node":  "Merge RAG and Signal Results",
+                                                                           "type":  "main",
+                                                                           "index":  0
+                                                                       }
+                                                                   ]
+                                                               ]
+                                                  },
+                        "Prepare Signal For Merge":  {
+                                                         "main":  [
+                                                                      [
+                                                                          {
+                                                                              "node":  "Merge RAG and Signal Results",
+                                                                              "type":  "main",
+                                                                              "index":  1
+                                                                          }
+                                                                      ]
+                                                                  ]
+                                                     },
+                        "Merge RAG and Signal Results":  {
+                                                             "main":  [
+                                                                          [
+                                                                              {
+                                                                                  "node":  "Prepare LangGraph Payload",
+                                                                                  "type":  "main",
+                                                                                  "index":  0
+                                                                              }
+                                                                          ]
+                                                                      ]
+                                                         },
+                        "Prepare LangGraph Payload":  {
+                                                          "main":  [
+                                                                       [
+                                                                           {
+                                                                               "node":  "HTTP Request - LangGraph Agent",
+                                                                               "type":  "main",
+                                                                               "index":  0
+                                                                           }
+                                                                       ]
+                                                                   ]
+                                                      },
+                        "HTTP Request - LangGraph Agent":  {
+                                                               "main":  [
+                                                                            [
+                                                                                {
+                                                                                    "node":  "Assemble Final Analysis Context",
+                                                                                    "type":  "main",
+                                                                                    "index":  0
+                                                                                }
+                                                                            ],
+                                                                            [
+                                                                                {
+                                                                                    "node":  "Error - LangGraph Agent",
+                                                                                    "type":  "main",
+                                                                                    "index":  0
+                                                                                }
+                                                                            ]
+                                                                        ]
+                                                           },
+                        "Error - LangGraph Agent":  {
+                                                        "main":  [
+                                                                     [
+                                                                         {
+                                                                             "node":  "Build Pipeline Error Response",
+                                                                             "type":  "main",
+                                                                             "index":  0
+                                                                         }
+                                                                     ]
+                                                                 ]
+                                                    },
+                        "Assemble Final Analysis Context":  {
+                                                                "main":  [
+                                                                             [
+                                                                                 {
+                                                                                     "node":  "Gemini Final Analysis Chain",
+                                                                                     "type":  "main",
+                                                                                     "index":  0
+                                                                                 }
+                                                                             ]
+                                                                         ]
+                                                            },
+                        "Gemini Final Analysis Chain":  {
+                                                            "main":  [
+                                                                         [
+                                                                             {
+                                                                                 "node":  "Parse Final Analysis Output",
+                                                                                 "type":  "main",
+                                                                                 "index":  0
+                                                                             }
+                                                                         ],
+                                                                         [
+                                                                             {
+                                                                                 "node":  "Error - Final Analysis",
+                                                                                 "type":  "main",
+                                                                                 "index":  0
+                                                                             }
+                                                                         ]
+                                                                     ]
+                                                        },
+                        "Error - Final Analysis":  {
+                                                       "main":  [
+                                                                    [
+                                                                        {
+                                                                            "node":  "Build Pipeline Error Response",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ]
+                                                                ]
+                                                   },
+                        "Parse Final Analysis Output":  {
+                                                            "main":  [
+                                                                         [
+                                                                             {
+                                                                                 "node":  "Router - Confidence and Category",
+                                                                                 "type":  "main",
+                                                                                 "index":  0
+                                                                             }
+                                                                         ]
+                                                                     ]
+                                                        },
+                        "Router - Confidence and Category":  {
+                                                                 "main":  [
+                                                                              [
+                                                                                  {
+                                                                                      "node":  "Build Success Response - Full Analysis",
+                                                                                      "type":  "main",
+                                                                                      "index":  0
+                                                                                  }
+                                                                              ]
+                                                                          ]
+                                                             },
+                        "Build Success Response - Full Analysis":  {
+                                                                       "main":  [
+                                                                                    [
+                                                                                        {
+                                                                                            "node":  "Respond - Full Analysis",
+                                                                                            "type":  "main",
+                                                                                            "index":  0
+                                                                                        }
+                                                                                    ]
+                                                                                ]
+                                                                   },
+                        "Build Pipeline Error Response":  {
+                                                              "main":  [
+                                                                           [
+                                                                               {
+                                                                                   "node":  "Respond Error",
+                                                                                   "type":  "main",
+                                                                                   "index":  0
+                                                                               }
+                                                                           ]
+                                                                       ]
+                                                          }
+                    },
+    "active":  false,
+    "settings":  {
+                     "executionOrder":  "v1",
+                     "binaryMode":  "separate",
+                     "availableInMCP":  true
+                 },
+    "pinData":  {
+
+                }
+}
