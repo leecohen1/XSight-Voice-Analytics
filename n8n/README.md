@@ -2,43 +2,69 @@
 
 n8n workflow exports and orchestration documentation for XSight.
 
-**Status:** Phase 9, Iteration 1 implemented — `workflows/phase9_iteration1_intake_to_assemblyai.json` covers nodes 1–4 below (webhook intake through AssemblyAI job submission and an immediate acknowledgement) with node 2 built as a real Pre-Transcription Guardrails call against `services/guardrails_service`, not a placeholder. Everything from post-transcription guardrails onward (nodes 5–16) is not yet implemented. See `SETUP.md` for import/connectivity instructions and `examples.md` for payload/curl examples.
+**Status:** The full 16-node pipeline (webhook intake through the confidence/category Router and the final webhook response) is built and verified against a live n8n instance via simulated end-to-end test executions (both an auto-pass run and a `human_review_required` run — see "Verified test runs" below). The live workflow is `XSight - Full Pipeline (Nodes 1-16) - Intake to Final Analysis and Routing` (workflow ID `RBII7JvRDFWwy98x` on the connected n8n Cloud instance), exported to `workflows/phase9_16_full_pipeline_intake_to_final_analysis.json`. It is **inactive** — activate only after the manual setup in `SETUP.md` (Gemini credential, RAG/Call-Signal-Analyser/LangGraph URLs) is complete.
 
-## Iteration 1 (current)
+Nodes 1–4 (webhook intake, pre-transcription guardrails, AssemblyAI upload/submit/poll) were already implemented and live-verified by an earlier iteration (Phase 9, Iteration 2a — see `workflows/phase9_iteration1_intake_to_assemblyai.json` for the original, simpler Iteration 1 export, kept for history; the live workflow evolved past it to add real polling before this build started). This document now covers the complete pipeline built on top of that: nodes 5–16.
 
-**Scope:** Webhook Trigger → Pre-Transcription Guardrails Check → (reject with `422` **or** continue) → Upload Audio to AssemblyAI → Submit Transcription Job → Respond `202 Accepted` with the AssemblyAI job id.
+## What's fully implemented (real logic, not a stub)
 
-**Deliberately out of scope for this iteration:** AssemblyAI callback/webhook handling, polling for job completion, post-transcription content guardrails, Gemini extraction, the AI Agent Node, RAG Service, Call Signal Analyser, LangGraph, the Final Analysis Chain, output guardrails, routing. The workflow stops once the transcription job is accepted.
+- **Node 5 — Post-transcription content check.** Implemented as an **inline n8n Code node** (`Post-Transcription Content Check`), not a second call to `guardrails_service`. Checked in `services/guardrails_service/app/main.py`: the real `POST /check/input` only ever runs `check_pre_transcription_input`, regardless of the `stage` field sent — there is no `post_transcription` branch. Calling it a second time with `stage: "post_transcription"` would just re-run file-presence checks against a request that has no file, and reject every submission. Per the user's explicit decision ("keep Guardrails limited to the currently working pre-transcription implementation unless the missing stages block the end-to-end flow"), this inline check reimplements the same rule set documented in `docs/api_contracts.md` (transcript non-empty/length, sales-topic keyword match, prompt-injection phrase match, a small offensive-word list) directly in the workflow. **Gap:** this is a lightweight regex/keyword check, not NeMo Guardrails — flagged in every result's `limitations` field.
+- **Node 6 — IF pass/fail** on the above.
+- **Node 7 — Gemini Information Extractor** (`Gemini Information Extractor`, `@n8n/n8n-nodes-langchain.googleGemini`, resource `text`/operation `message`, `jsonOutput: true`). Extraction-only prompt (customer_intent, main_objection, customer_sentiment, closing_attempt, key_sales_events, call_category) — explicitly instructed never to generate coaching feedback or a final analysis. Followed by `Parse Gemini Extraction` (Code node), which defensively parses the model's text output and clamps every field to the exact enum lists `services/call_signal_analyser` expects, so a malformed LLM response can never break downstream schema validation.
+- **Node 8 — n8n AI Agent Node** (`AI Agent Node - Classify and Enrich`, same Gemini node type). Scoped strictly to classification + enrichment per CLAUDE.md's limited role: submission intent, `decision_maker_present`, `relevant_services` (default both), an enriched call category. The prompt explicitly forbids reasoning over evidence, coaching feedback, evidence reconciliation, or inventing information. **Design decision:** the actual downstream HTTP payload construction (`Prepare Downstream Payloads`) is a separate, fully deterministic Code node — the LLM's output is enrichment only, wire-format construction is never left to the model.
+- **Nodes 9–10 — parallel HTTP calls** to the RAG Service (`POST /query`) and Call Signal Analyser (`POST /analyse-call`), built from `docs/api_contracts.md` sections 1 and 2 exactly (verified against the real Pydantic models in `services/rag_service` and `services/call_signal_analyser/app/models.py`, not just the docs).
+- **Node 11 — Merge** (`Merge RAG and Signal Results`, combine/combineByPosition) waits for both branches.
+- **Node 12 — LangGraph Agent call** (`HTTP Request - LangGraph Agent`, `POST /agent/run`), payload built from `docs/api_contracts.md` section 4 / `services/langgraph_agent/app/models.py`.
+- **Node 13 — Gemini Final Analysis Chain** (`Gemini Final Analysis Chain`), a second Gemini call grounded explicitly in the extraction + RAG results + signal analysis + LangGraph's reasoning output, instructed never to invent facts and to cite `call_id`s exactly as given. Followed by `Parse Final Analysis Output`, which defensively parses the response and — regardless of what the model wrote — always appends the pipeline's own known limitations (inline guardrails, missing output guardrails, any clamped audio features, the speaker-mapping heuristic) to the `limitations` field, so it stays honest even if the model omits something.
+- **Node 14 — Output guardrails: intentionally skipped**, not stubbed as a fake pass. `services/guardrails_service` does not implement `POST /check/output` yet. Rather than fabricate a `pass`, every result's `limitations` field states plainly that output guardrails were not run, and the Router (node 15) records `output_guardrails_not_implemented_skipped_check` in its internal `router_reasons` on every single request — this is a permanent, visible gap marker, not a one-time note.
+- **Node 15 — Router** (`Router - Confidence and Category`, Code node). Implements CLAUDE.md's exact rule: `guardrail_status` becomes `human_review_required` when the Call Signal Analyser's `confidence < 0.65`, OR LangGraph's `evidence_conflicts` is non-empty, OR historical-call claims are missing `call_id` citations, OR the Final Analysis Chain's response could not be parsed as JSON. Otherwise `guardrail_status: pass` and `routing_category` is kept from the Final Analysis Chain (or defaulted to `human_review_required` as the category too, if that path was taken and no category was set).
+- **Node 16 — Respond to Webhook** with the complete final JSON, matching CLAUDE.md's "Final output JSON schema" field-for-field.
+- **Speaker tagging.** AssemblyAI's diarization returns generic `Speaker 0`/`Speaker 1` labels, not named roles. `Build Speaker-Tagged Transcript` (Code node) applies a heuristic — the first speaker to talk is assumed to be the Agent, every other distinct speaker is folded into Customer — to produce the `Agent:`/`Customer:` tagged transcript the rest of the pipeline (and the Call Signal Analyser's `agent_talk_ratio`) depends on. **This is an assumption, not a verified mapping** — recorded per-request in `pipeline_assumptions` and folded into the final `limitations` field.
+- **Audio-derived features.** `call_duration_seconds` is measured from AssemblyAI's real `audio_duration`; `silence_ratio` and `speech_to_non_speech_ratio` are estimated from the gaps between AssemblyAI's utterance timestamps (a real, lightweight measurement from returned data, not a fabricated default); `speaking_rate_wpm` and `agent_talk_ratio` are computed from real word counts. **Known limitation:** `services/call_signal_analyser`'s current (mock-phase) Pydantic schema enforces narrow synthetic-dataset ranges (e.g. `call_duration_seconds` 180–900s, `silence_ratio` 0.05–0.35) inherited from `docs/dataset_design.md`. Real calls outside these bounds are clamped to the nearest bound before the request is sent, purely so the demo can complete a live call to that service — this is a stopgap, not a grounded transformation, and every clamped field is recorded in `clamped_fields` and surfaced in the final `limitations` text.
+- **Error handling.** Every new HTTP/Gemini node uses `onError: continueErrorOutput` with retries; a failure at any of nodes 5–13 produces a structured `error` HTTP response (via a shared `Build Pipeline Error Response` node feeding the existing `Respond Error` node) rather than a raw n8n exception, matching CLAUDE.md's error-table row "a required upstream call fails → webhook returns an error response."
 
-**Not yet verified against a live n8n instance** — built against n8n's documented node schema, not confirmed by an actual import/execution (no n8n Cloud access in this environment). See `SETUP.md` for what to check on first import.
+## What's stubbed, skipped, or a known gap
 
-**Open dependency:** which local-to-cloud connectivity approach (ngrok / Cloudflare Tunnel / local n8n via Docker Compose) exposes `guardrails_service` to n8n is still an open decision (`docs/PROGRESS.md`) — `SETUP.md` documents both paths generically via an environment variable (`GUARDRAILS_SERVICE_URL`) so the workflow doesn't hardcode one before that's settled.
+- **Output guardrails (`POST /check/output`) are not called** — `services/guardrails_service` doesn't implement that route yet. See node 14 above.
+- **Post-transcription content guardrails are inline n8n logic, not NeMo Guardrails** — see node 5 above. No LLM-based topic/jailbreak rail runs on the transcript; only deterministic keyword/regex checks.
+- **Audio-derived feature clamping** — see "Audio-derived features" above. `average_pause_duration_seconds`, `interruptions_count`, `average_pitch_hz`, `average_energy_level` are not computed at all (optional fields, correctly omitted rather than fabricated).
+- **Gemini credential does not exist yet** in the connected n8n instance. All three Gemini nodes (`Gemini Information Extractor`, `AI Agent Node - Classify and Enrich`, `Gemini Final Analysis Chain`) reference a credential named `Gemini API - XSight` (type `googlePalmApi`) that must be created and bound by the user before a live (non-simulated) run — see `SETUP.md`. The model ID used (`models/gemini-2.5-flash`) has not been confirmed against a real key; verify/adjust it once the credential exists.
+- **RAG/Call-Signal-Analyser/LangGraph reachability from n8n is unverified for a *live* (non-simulated) run.** `guardrails_service` is deployed and reachable at a real EC2 IP (`http://3.151.162.120:8003`, wired directly into the existing pre-transcription node — see `docs/PROGRESS.md`); there is no confirmation the other three services are deployed anywhere reachable from n8n Cloud yet. See `SETUP.md`'s connectivity section — this blocks a fully live (non-simulated) test today.
+
+## Verified test runs (simulated, via n8n MCP `test_workflow`)
+
+Both runs used realistic pinned data for the AssemblyAI/Gemini/RAG/Call-Signal-Analyser/LangGraph nodes (a 14-turn price-objection sales call transcript) and ran the real logic for every Code/Set/IF node in between — i.e. every line of new orchestration logic executed for real, only the four external services' responses were simulated.
+
+1. **Auto-pass** (execution `15`): Call Signal Analyser confidence `0.86`, no evidence conflicts, one cited historical call → final `guardrail_status: "pass"`, `routing_category: "pricing_negotiation"`. `call_duration_seconds` was measured at 130s and clamped up to the service's 180s floor (recorded in `clamped_fields` and `limitations`); all other audio features fell naturally inside the accepted ranges.
+2. **Human review required** (execution `16`): Call Signal Analyser confidence dropped to `0.42` and LangGraph reported an `evidence_conflicts` entry → final `guardrail_status: "human_review_required"`, with `router_reasons: ["call_signal_analyser_confidence_below_0.65", "langgraph_evidence_conflicts_detected", "output_guardrails_not_implemented_skipped_check"]`.
+
+Both runs produced a complete, schema-matching final JSON (`transcript`, `call_summary`, `customer_intent`, `main_objection`, `customer_sentiment`, `call_outcome`, `agent_performance_score`, `lead_quality_score`, `similar_calls[]`, `coaching_feedback[]`, `recommended_next_action`, `suggested_follow_up_email`, `routing_category`, `confidence`, `risk_level`, `detected_signals[]`, `limitations`, `guardrail_status`).
+
+**Note on `customer_sentiment`:** CLAUDE.md's final-output schema only allows `positive | neutral | negative` (no `mixed`), while the internal extraction/Call-Signal-Analyser schemas allow a fourth value, `mixed`. `Parse Final Analysis Output` intentionally downgrades `mixed` to `neutral` in the final output only, to satisfy the customer-facing contract — this is a deliberate mapping, not a bug.
 
 ## Purpose
 
 n8n Cloud is the central workflow orchestrator for XSight — it calls every AI component in the pipeline directly. It receives the sales call submission from the React frontend, coordinates the two-stage Guardrails Service checks and the transcription API, calls Gemini for structured semantic extraction, calls a limited-role n8n AI Agent Node for intent classification and field enrichment, calls the RAG Service and Call Signal Analyser directly (in parallel, using the payloads the AI Agent Node prepared), calls the LangGraph agent for multi-step reasoning over their merged results, calls Gemini a second time (the Final Analysis LLM Chain) to assemble the complete result, calls the Output Guardrails, and routes the response. No AI component calls another — n8n orchestrates all of it directly. See [CLAUDE.md](../CLAUDE.md#component-responsibility-boundaries) for the full responsibility split.
 
-## Planned nodes
+## All 16 nodes (final status)
 
-*(Nodes 1–4 are implemented as of Iteration 1 — adapted slightly from the original plan since AssemblyAI's real API is a two-call upload-then-submit flow, not one "Transcription API HTTP Request." Node 4 below is that pair plus the acknowledgement response. Nodes 5+ are not yet implemented.)*
+1. Webhook Trigger — **implemented** (live-verified, earlier iteration)
+2. Pre-Transcription File Validation HTTP Request — **implemented** (live-verified, earlier iteration; calls the real deployed `guardrails_service`)
+3. IF pass/fail (file validation) — **implemented** (earlier iteration)
+4. Transcription API (AssemblyAI upload/submit/poll) — **implemented** (live-verified, earlier iteration)
+5. Post-Transcription Input Content Guardrails — **implemented as an inline n8n check**, not a `guardrails_service` call (see "What's stubbed" above)
+6. IF pass/fail (content guardrails) — **implemented**
+7. Information Extractor — Gemini — **implemented**, needs a real credential (see `SETUP.md`)
+8. n8n AI Agent Node — **implemented**, needs a real credential (see `SETUP.md`)
+9. HTTP Request to RAG Service — **implemented**, needs `RAG_SERVICE_URL` reachable from n8n
+10. HTTP Request to Voice / Call Signal Analyser — **implemented**, needs `CALL_SIGNAL_ANALYSER_URL` reachable from n8n
+11. Merge Results — **implemented**
+12. HTTP Request to LangGraph Agent — **implemented**, needs `LANGGRAPH_AGENT_URL` reachable from n8n
+13. Final Analysis LLM Chain — Gemini — **implemented**, needs a real credential (see `SETUP.md`)
+14. Output Guardrails HTTP Request — **not implemented** (service gap, not an oversight — see above)
+15. Router — confidence and category routing — **implemented**
+16. Respond to Webhook — **implemented**
 
-1. Webhook Trigger — **implemented**
-2. Pre-Transcription File Validation HTTP Request (deterministic checks) — **implemented** (as "Pre-Transcription Guardrails Check")
-3. IF pass/fail (file validation) — **implemented** (as "Guardrails Passed?", with an explicit reject-response node on the false branch)
-4. Transcription API HTTP Request — **implemented**, as three nodes: Upload Audio to AssemblyAI → Submit Transcription Job → Respond - Job Accepted (202, with the AssemblyAI job id)
-5. Post-Transcription Input Content Guardrails HTTP Request (NeMo + deterministic rules)
-6. IF pass/fail (content guardrails)
-7. Information Extractor — Gemini (structured semantic extraction only)
-8. n8n AI Agent Node — intent classification and field enrichment (limited role — see below)
-9. HTTP Request to RAG Service (parallel branch, using the AI Agent Node's payload)
-10. HTTP Request to Voice / Call Signal Analyser (parallel branch, using the AI Agent Node's payload)
-11. Merge Results — join the RAG Service and Call Signal Analyser results
-12. HTTP Request to LangGraph Agent (multi-step reasoning over the transcript, extraction, enrichment, RAG results, and Call Signal Analyser results — runs after the parallel calls because it consumes both; does not call those services itself)
-13. Final Analysis LLM Chain — Gemini (combines the extraction, enrichment, RAG results, Call Signal Analyser results, and LangGraph's reasoning output into the complete final output JSON)
-14. Output Guardrails HTTP Request (NeMo + deterministic rules)
-15. Router — confidence and category routing (confidence < 0.65, conflicting evidence, missing citations, or severe guardrail flags all route to `human_review_required`)
-16. Respond to Webhook
+**n8n AI Agent Node (node 8) — limited role.** Must: classify the submission intent, enrich the extracted sales fields, determine which downstream services are relevant, prepare their structured payloads. Must not: generate the final report, replace LangGraph's reasoning, generate coaching feedback, reconcile evidence, or invent missing information. Enforced here by keeping payload construction in a separate deterministic Code node (see above).
 
-**n8n AI Agent Node (node 8) — limited role.** Must: classify the submission intent, enrich the extracted sales fields, determine which downstream services are relevant, prepare their structured payloads. Must not: generate the final report, replace LangGraph's reasoning, generate coaching feedback, reconcile evidence, or invent missing information.
-
-See [CLAUDE.md](../CLAUDE.md) for full node details and the local-to-cloud connectivity note (ngrok / Cloudflare Tunnel / local n8n via Docker Compose).
+See [CLAUDE.md](../CLAUDE.md) for full node details, and `SETUP.md` for exact setup steps (credentials, environment variables, connectivity) required before a live (non-simulated) run.

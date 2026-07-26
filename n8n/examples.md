@@ -1,4 +1,6 @@
-# n8n Webhook — Payload and curl Examples (Phase 9, Iteration 1)
+# n8n Webhook — Payload and curl Examples
+
+**Update:** the live workflow now implements the full 16-node pipeline (see `README.md` and `workflows/phase9_16_full_pipeline_intake_to_final_analysis.json`), not just the Iteration 1 slice these examples were originally written for. The request shape below (multipart form: `audio_file`, `agent_name`, `call_date`, optional `customer_name`/`notes`) is unchanged. What changed is the **response**: instead of stopping at a `202 Accepted` job-id acknowledgement, a successful submission now runs all the way through Gemini extraction, the AI Agent Node, the parallel RAG/Call-Signal-Analyser calls, LangGraph, the Final Analysis Chain, and the Router, returning the complete final-output JSON synchronously (see "6. Full pipeline — final analysis response" below). Sections 1–5 below are kept for historical reference (they described the old `202`/partial-flow behavior) but no longer match what the live workflow returns for a passing submission — see section 6 for the current contract.
 
 Examples for `workflows/phase9_iteration1_intake_to_assemblyai.json`. Replace `<WEBHOOK_URL>` with the Webhook Trigger node's Test URL (while building/reviewing) or Production URL (once the workflow is activated) — see `n8n/SETUP.md`.
 
@@ -146,3 +148,57 @@ curl -X POST https://api.assemblyai.com/v2/transcript \
 ```
 
 If these two calls work directly but the n8n workflow fails at the AssemblyAI step, the issue is in the workflow's node wiring (binary property name, header expression, env var), not AssemblyAI itself.
+
+---
+
+## 6. Full pipeline — final analysis response (current behavior)
+
+Once transcription completes and both guardrail stages pass, the same webhook call now continues through Gemini extraction, the AI Agent Node, RAG + Call Signal Analyser (parallel), LangGraph, the Final Analysis Chain, and the Router, and returns a single synchronous response matching CLAUDE.md's final output JSON schema:
+
+```bash
+curl -i -X POST "<WEBHOOK_URL>" \
+  -F "audio_file=@./sample_call.mp3;type=audio/mpeg" \
+  -F "agent_name=Sarah Levi" \
+  -F "call_date=2026-07-26" \
+  -F "customer_name=Acme Manufacturing"
+```
+
+**Expected response — `200 OK`, auto-pass case** (matches simulated test execution `15` — see `README.md`):
+
+```json
+{
+  "transcript": "Agent: ...\nCustomer: ...",
+  "call_summary": "...",
+  "customer_intent": "medium",
+  "main_objection": "price",
+  "customer_sentiment": "neutral",
+  "call_outcome": "Follow-up Needed",
+  "agent_performance_score": 3,
+  "lead_quality_score": 4,
+  "similar_calls": [{"call_id": "CALL_007", "agent_name": "Daniel Cohen", "sale_result": "Sale", "main_objection": "price", "similarity_score": 0.88, "reason": "..."}],
+  "coaching_feedback": ["...", "..."],
+  "recommended_next_action": "...",
+  "suggested_follow_up_email": "...",
+  "routing_category": "pricing_negotiation",
+  "confidence": 0.86,
+  "risk_level": "Medium",
+  "detected_signals": ["price objection", "competitor comparison", "weak closing attempt"],
+  "limitations": "... (always includes the pipeline's known gaps -- inline guardrails, missing output guardrails, any clamped audio features, the speaker-mapping heuristic)",
+  "guardrail_status": "pass"
+}
+```
+
+**Expected response — `200 OK`, human-review-required case** (matches simulated test execution `16`): identical shape, but `"guardrail_status": "human_review_required"` whenever the Call Signal Analyser's confidence drops below `0.65` and/or LangGraph reports `evidence_conflicts` — see `README.md` for the exact router rule.
+
+**Expected response on an upstream failure** (any of nodes 5–13 erroring, e.g. RAG/Call-Signal-Analyser/LangGraph/Gemini unreachable) — a structured error, never a raw n8n exception:
+
+```json
+{
+  "status": "error",
+  "stage": "rag_service",
+  "error_code": "rag_service_unreachable",
+  "message": "RAG Service (POST /query) call failed: ...",
+  "processing_time_ms": 1234,
+  "workflow_version": "phase9-16-full-pipeline"
+}
+```
