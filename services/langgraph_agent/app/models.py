@@ -1,10 +1,11 @@
 """Pydantic request/response models for the LangGraph Agent service.
 
-Real behavior (Phase 14): a LangGraph graph — Planner Node -> Evidence
-Reconciliation Node -> Synthesizer Node — reasoning over evidence n8n has
-already fetched (this service never calls the RAG Service or Call Signal
-Analyser itself). This phase implements the API contract and a deterministic
-mock; see app/graph.py for the documented (not-yet-installed) graph plan.
+A real LangGraph graph — Planner Node -> Evidence Reconciliation Node ->
+Synthesizer Node, compiled as a `langgraph.graph.StateGraph` — reasons over
+evidence n8n has already fetched (this service never calls the RAG Service
+or Call Signal Analyser itself). See app/graph.py for the graph definition.
+Per-node reasoning is still deterministic/rule-based; no LLM call is made
+yet (Phase 14 LLM backend decision pending).
 """
 from typing import Any
 
@@ -34,6 +35,12 @@ class AgentRunResponse(BaseModel):
     recommended_next_action: str
     evidence_used: list[str]
     mock: bool
+    # Additive, optional debug field: the actual sequence of LangGraph node
+    # names executed for this request (e.g. ["Planner", "Evidence
+    # Reconciliation", "Synthesizer"]). Proves a real StateGraph ran; not
+    # part of the documented contract's required fields, so existing
+    # consumers built against the pre-StateGraph contract are unaffected.
+    graph_trace: list[str] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):

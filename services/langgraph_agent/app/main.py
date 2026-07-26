@@ -1,12 +1,12 @@
-"""XSight LangGraph Agent Service — FastAPI mock skeleton (Phase 6).
+"""XSight LangGraph Agent Service — real LangGraph StateGraph execution.
 
-Real behavior (Phase 14): a LangGraph graph (Planner -> Evidence
-Reconciliation -> Synthesizer, LLM backend TBD) reasoning over evidence n8n
-has already fetched from the RAG Service and Call Signal Analyser — this
-service never calls those services itself. This phase implements the API
-contract, validation, and error handling only — POST /agent/run returns a
-deterministic mock (see app/graph.py), clearly labeled `"mock": true`. No
-LangGraph graph is installed or executed in this phase.
+A compiled `langgraph.graph.StateGraph` (Planner -> Evidence Reconciliation
+-> Synthesizer, see app/graph.py) reasons over evidence n8n has already
+fetched from the RAG Service and Call Signal Analyser — this service never
+calls those services itself and makes no outbound HTTP calls of its own.
+POST /agent/run invokes that compiled graph per-request. Per-node reasoning
+is still deterministic/rule-based — no LLM backend is wired in yet (Phase 14
+LLM backend decision pending) — see app/graph.py and README "Limitations".
 """
 import logging
 
@@ -15,7 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.graph import run_mock_graph
+from app.graph import run_graph
 from app.models import AgentRunRequest, AgentRunResponse, HealthResponse
 
 SERVICE_NAME = "langgraph_agent"
@@ -57,6 +57,6 @@ async def health() -> HealthResponse:
 
 @app.post("/agent/run", response_model=AgentRunResponse)
 async def agent_run(payload: AgentRunRequest) -> AgentRunResponse:
-    logger.info("Mock /agent/run received: question=%r", payload.question)
-    result = run_mock_graph(payload)
+    logger.info("/agent/run received: question=%r", payload.question)
+    result = run_graph(payload)
     return AgentRunResponse(**result)
