@@ -34,7 +34,10 @@ def test_health_returns_ok():
 
 def test_analyse_call_matches_documented_example():
     """The exact example from CLAUDE.md / docs/api_contracts.md — pins the
-    documented mock rules to a known, reviewable output."""
+    documented mock rules to a known, reviewable output. Fixed regression
+    check: fully-populated audio_features must still reproduce this exactly
+    after the demo-day missing-evidence changes (zero missing features means
+    zero confidence penalty)."""
     resp = client.post("/analyse-call", json=CANONICAL_PAYLOAD)
     assert resp.status_code == 200
     body = resp.json()
@@ -46,6 +49,7 @@ def test_analyse_call_matches_documented_example():
     assert body["detected_signals"] == ["price objection", "high customer interest", "weak closing attempt"]
     assert body["human_review_required"] is False
     assert body["mock"] is True
+    assert body["missing_features"] == []
 
 
 def test_analyse_call_is_deterministic():
@@ -137,3 +141,102 @@ def test_rejects_short_transcript():
     payload = {**CANONICAL_PAYLOAD, "transcript": "too short"}
     resp = client.post("/analyse-call", json=payload)
     assert resp.status_code == 422
+
+
+# --- Missing audio evidence (demo-day uncertainty pass) ---------------------
+#
+# Ground Truth Rule: a feature that can't be measured must be reported
+# missing, never fabricated/defaulted (e.g. never a silently-defaulted
+# silence_ratio: 0.0). These tests confirm: (1) omitted/null audio_features
+# fields never trigger a 422, (2) they are reported verbatim in
+# `missing_features`, (3) each missing feature lowers confidence by the
+# documented per-feature penalty, and (4) a missing *critical* feature
+# (silence_ratio or agent_talk_ratio) forces human_review_required even when
+# the resulting confidence number alone would stay >= 0.65.
+
+def test_some_noncritical_audio_features_missing_lowers_confidence():
+    """Omitting a non-critical audio feature (call_duration_seconds) must
+    still return 200, report it as missing, apply the standard -0.05
+    penalty, and NOT force human review on its own (confidence stays >= 0.65
+    and no critical feature is missing)."""
+    payload = {
+        **CANONICAL_PAYLOAD,
+        "audio_features": {
+            **CANONICAL_PAYLOAD["audio_features"],
+            "call_duration_seconds": None,
+        },
+    }
+    resp = client.post("/analyse-call", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["missing_features"] == ["call_duration_seconds"]
+    assert body["confidence"] == 0.67  # 0.72 documented baseline - 0.05 standard penalty
+    assert body["human_review_required"] is False
+
+
+def test_missing_critical_audio_feature_forces_human_review():
+    """Even with structured fields strong enough to keep the confidence
+    formula itself at 0.75 (>= 0.65 threshold), a missing critical feature
+    (agent_talk_ratio) must force human_review_required to True — incomplete
+    load-bearing evidence is not the same guarantee as complete evidence at
+    the same confidence number."""
+    payload = {
+        **CANONICAL_PAYLOAD,
+        "audio_features": {
+            **CANONICAL_PAYLOAD["audio_features"],
+            "agent_talk_ratio": None,
+        },
+        "structured_fields": {
+            "customer_intent": "high",
+            "main_objection": "price",
+            "customer_sentiment": "positive",
+            "closing_attempt": "strong",
+            "decision_maker_present": True,
+        },
+    }
+    resp = client.post("/analyse-call", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["missing_features"] == ["agent_talk_ratio"]
+    assert body["confidence"] == 0.75
+    assert body["human_review_required"] is True
+
+
+def test_all_audio_features_missing_never_fabricated():
+    """With every scored audio feature omitted, the service must still
+    return 200 (never 422 for a missing-but-optional field), report all five
+    as missing (never defaulting any to 0.0 or another fabricated number),
+    apply the full stacked penalty, and require human review."""
+    payload = {
+        **CANONICAL_PAYLOAD,
+        "audio_features": {"average_energy_level": "medium"},
+    }
+    resp = client.post("/analyse-call", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["missing_features"] == [
+        "call_duration_seconds",
+        "silence_ratio",
+        "speaking_rate_wpm",
+        "speech_to_non_speech_ratio",
+        "agent_talk_ratio",
+    ]
+    assert body["confidence"] == 0.27
+    assert body["human_review_required"] is True
+    assert body["risk_level"] == "High"
+
+
+def test_missing_audio_features_via_omission_not_just_explicit_null():
+    """Fields left out of the JSON body entirely (not just explicit `null`)
+    must behave identically to explicit null — both mean 'unmeasured'."""
+    payload = {**CANONICAL_PAYLOAD, "audio_features": {}}
+    resp = client.post("/analyse-call", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body["missing_features"]) == {
+        "call_duration_seconds",
+        "silence_ratio",
+        "speaking_rate_wpm",
+        "speech_to_non_speech_ratio",
+        "agent_talk_ratio",
+    }
