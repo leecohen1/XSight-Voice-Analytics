@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.graph import COMPILED_GRAPH, GraphState
 from app.main import app
 
 client = TestClient(app)
@@ -42,6 +43,40 @@ def test_agent_run_full_payload():
     assert body["coaching_points"] == ["Strengthen the closing ask — propose a concrete next step with a date."]
     assert body["recommended_next_action"] == "Schedule a follow-up with the decision-maker."
     assert body["evidence_conflicts"] == []
+    # Proves the compiled StateGraph actually executed all three nodes, in
+    # order, for this request — not just that the response shape matches.
+    assert body["graph_trace"] == ["Planner", "Evidence Reconciliation", "Synthesizer"]
+
+
+def test_compiled_graph_is_a_real_langgraph_stategraph():
+    """Confirms app.graph builds and compiles an actual langgraph
+    StateGraph (not a plain function chain) and that invoking it directly
+    (bypassing the FastAPI layer entirely) runs all three named nodes and
+    produces the expected output fields in the shared state."""
+    from langgraph.graph.state import CompiledStateGraph
+
+    assert isinstance(COMPILED_GRAPH, CompiledStateGraph)
+
+    initial_state: GraphState = {
+        "question": FULL_PAYLOAD["question"],
+        "transcript": FULL_PAYLOAD["transcript"],
+        "metadata": FULL_PAYLOAD["metadata"],
+        "structured_extraction": FULL_PAYLOAD["structured_extraction"],
+        "rag_results": FULL_PAYLOAD["rag_results"],
+        "signal_analysis": FULL_PAYLOAD["signal_analysis"],
+        "agent_enrichment": {},
+        "graph_trace": [],
+    }
+    final_state = COMPILED_GRAPH.invoke(initial_state)
+
+    assert final_state["graph_trace"] == ["Planner", "Evidence Reconciliation", "Synthesizer"]
+    assert final_state["plan"] == {
+        "has_structured_extraction": True,
+        "has_rag_results": True,
+        "has_signal_analysis": True,
+    }
+    assert "CALL_007" in final_state["answer"]
+    assert final_state["evidence_conflicts"] == []
 
 
 def test_agent_run_is_deterministic():
@@ -58,6 +93,9 @@ def test_agent_run_minimal_payload_no_evidence():
     assert body["evidence_used"] == []
     assert body["coaching_points"] == ["Confirm a concrete follow-up date."]
     assert body["recommended_next_action"] == "Review the call summary with the sales manager."
+    # All three graph nodes still run even with no evidence supplied — the
+    # graph's edges are fixed; only each node's output content varies.
+    assert body["graph_trace"] == ["Planner", "Evidence Reconciliation", "Synthesizer"]
 
 
 def test_agent_run_flags_low_confidence_conflict():
