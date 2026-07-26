@@ -7,6 +7,14 @@ trained in Phase 13 (see docs/dataset_design.md §15-§17).
 
 All tables below are the complete, documented rule set — nothing here is
 hidden or randomized, so the same input always produces the same output.
+
+Demo-day uncertainty pass (see CLAUDE.md Ground Truth Rules): audio-derived
+features that couldn't be measured arrive as `None` (app/models.py) rather
+than a fabricated default. This module never substitutes a fabricated number
+for a missing audio feature — instead, missing audio evidence is (a) detected,
+(b) turned into an explicit confidence penalty, (c) surfaced in the response
+as `missing_features`, and (d) allowed to force `human_review_required` even
+when the confidence formula alone wouldn't have crossed the threshold.
 """
 from app.models import AnalyseCallRequest, AnalyseCallResponse
 
@@ -29,18 +37,64 @@ _INTEREST_LABEL_BY_INTENT = {
 
 HUMAN_REVIEW_CONFIDENCE_THRESHOLD = 0.65
 
+# --- Missing audio evidence -------------------------------------------------
+#
+# The five scored AudioFeatures fields (average_energy_level is excluded: it
+# was already optional pre-demo-day and is not used in scoring). Order here
+# is also the order features are reported in `missing_features`.
+_AUDIO_FEATURE_FIELDS = (
+    "call_duration_seconds",
+    "silence_ratio",
+    "speaking_rate_wpm",
+    "speech_to_non_speech_ratio",
+    "agent_talk_ratio",
+)
+
+# "Critical" features are the ones the rest of the pipeline leans on most
+# heavily downstream of this service: `agent_talk_ratio` is the direct input
+# to the talk-time coaching signal (and the only speaker-tagging-derived
+# feature at all), and `silence_ratio` is the primary engagement/dead-air
+# signal used to sanity-check the transcript-derived intent/closing read.
+# Losing either one means the confidence score is missing a load-bearing
+# input, not just a nice-to-have one — so a missing critical feature forces
+# human review regardless of what the rest of the formula computes.
+# `call_duration_seconds`, `speaking_rate_wpm`, and
+# `speech_to_non_speech_ratio` are still real evidence (hence still penalized)
+# but are corroborating/contextual rather than load-bearing on their own.
+_CRITICAL_AUDIO_FEATURES = frozenset({"silence_ratio", "agent_talk_ratio"})
+
+# Confidence penalty applied PER missing feature, by criticality. Applied on
+# top of the existing structured-fields adjustments, before clamping/rounding.
+_MISSING_FEATURE_CONFIDENCE_ADJ = {"critical": -0.15, "standard": -0.05}
+
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
 
-def compute_confidence(fields) -> float:
+def detect_missing_audio_features(audio_features) -> list[str]:
+    """Return the names of AudioFeatures fields that are `None` (unmeasured),
+    in `_AUDIO_FEATURE_FIELDS` order. Never treats a missing value as 0.0/a
+    default — a field is either present with a validated value, or reported
+    here as missing."""
+    return [name for name in _AUDIO_FEATURE_FIELDS if getattr(audio_features, name) is None]
+
+
+def compute_missing_feature_penalty(missing_features: list[str]) -> float:
+    return sum(
+        _MISSING_FEATURE_CONFIDENCE_ADJ["critical" if name in _CRITICAL_AUDIO_FEATURES else "standard"]
+        for name in missing_features
+    )
+
+
+def compute_confidence(fields, missing_features: list[str]) -> float:
     raw = (
         _CONFIDENCE_BASE
         + _INTENT_CONFIDENCE_ADJ[fields.customer_intent]
         + _CLOSING_CONFIDENCE_ADJ[fields.closing_attempt]
         + _SENTIMENT_CONFIDENCE_ADJ[fields.customer_sentiment]
         + _DECISION_MAKER_CONFIDENCE_ADJ[fields.decision_maker_present]
+        + compute_missing_feature_penalty(missing_features)
     )
     return round(_clamp(raw, 0.0, 1.0), 2)
 
@@ -80,8 +134,15 @@ def compute_detected_signals(fields) -> list[str]:
 def analyse(request: AnalyseCallRequest) -> AnalyseCallResponse:
     fields = request.structured_fields
 
-    confidence = compute_confidence(fields)
-    human_review_required = confidence < HUMAN_REVIEW_CONFIDENCE_THRESHOLD
+    missing_features = detect_missing_audio_features(request.audio_features)
+    confidence = compute_confidence(fields, missing_features)
+
+    # Missing critical audio evidence forces human review even if the
+    # confidence formula alone stays >= threshold — an incomplete-evidence
+    # score is not the same guarantee as a complete-evidence score at the
+    # same number, so it must not silently pass as if it were.
+    has_missing_critical_feature = any(name in _CRITICAL_AUDIO_FEATURES for name in missing_features)
+    human_review_required = confidence < HUMAN_REVIEW_CONFIDENCE_THRESHOLD or has_missing_critical_feature
 
     return AnalyseCallResponse(
         predicted_outcome=compute_predicted_outcome(fields),
@@ -92,4 +153,5 @@ def analyse(request: AnalyseCallRequest) -> AnalyseCallResponse:
         detected_signals=compute_detected_signals(fields),
         human_review_required=human_review_required,
         mock=True,
+        missing_features=missing_features,
     )
