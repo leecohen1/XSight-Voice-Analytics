@@ -1,0 +1,55 @@
+{
+  "transcript": "Agent: Hi, this is Daniel from Northwind Solutions, thanks for hopping on the call. Am I speaking with Maya?\nCustomer: Yes, that's me. I've only got about fifteen minutes, just so you know.\nAgent: Totally fine, I'll keep it tight. Last time we spoke you mentioned the team was evaluating a few options for the onboarding automation piece. Where did that land?\nCustomer: We're still looking. Honestly the main thing holding us back is price. Your quote came in higher than the other vendor we're talking to.\nAgent: Understood — can I ask what they quoted, roughly, so I know what we're up against?\nCustomer: About twenty percent less, but their support model looked thinner. I don't know, we haven't decided.\nAgent: That's useful to know. Our support includes a dedicated onboarding specialist for the first ninety days, which usually cuts implementation time in half compared to self-serve. Would that matter for your team given the timeline you mentioned?\nCustomer: It might. We do need this live before Q4 planning starts. I just need to see the number work for our budget.\nAgent: Let me put together a revised proposal that breaks out the onboarding cost separately so you can compare apples to apples with the other vendor. Would early next week work to walk through it?\nCustomer: Yeah, Tuesday could work. Send something over before then so I can loop in my director.\nAgent: Will do — I'll email the breakdown by Friday so you have time to review before Tuesday.\nCustomer: Okay, sounds good. I do need to jump to another call now.\nAgent: No problem, thanks for the time, Maya — talk Tuesday.",
+  "call_summary": "Returning prospect Maya raised a price objection after comparing a competitor's quote that came in roughly 20% lower. The agent probed for the competitor's offer, positioned the dedicated 90-day onboarding specialist as a differentiator tied to her Q4 timeline, and secured a follow-up call for Tuesday with a proposal to be sent by Friday. The call ended on a scheduled next step rather than a resolved decision.",
+  "customer_intent": "Evaluating onboarding automation vendors with an active budget comparison; leaning toward a decision before Q4 planning begins.",
+  "main_objection": "price",
+  "customer_sentiment": "neutral",
+  "call_outcome": "Follow-up Needed",
+  "agent_performance_score": 4,
+  "lead_quality_score": 4,
+  "similar_calls": [
+    {
+      "call_id": "CALL_007",
+      "agent_name": "Sarah Levi",
+      "sale_result": "Sale",
+      "main_objection": "price",
+      "similarity_score": 0.87,
+      "reason": "CALL_007 also involved a competitor quote roughly 15-20% lower; the deal closed after the agent broke out onboarding/support value separately, mirroring the revised-proposal approach used in this call."
+    },
+    {
+      "call_id": "CALL_012",
+      "agent_name": "Daniel Cohen",
+      "sale_result": "No Sale",
+      "main_objection": "price",
+      "similarity_score": 0.74,
+      "reason": "CALL_012 shows a similar price objection but the customer disengaged after the follow-up proposal was sent late, missing the prospect's internal decision deadline."
+    },
+    {
+      "call_id": "CALL_019",
+      "agent_name": "Sarah Levi",
+      "sale_result": "Follow-up Needed",
+      "main_objection": "timing",
+      "similarity_score": 0.61,
+      "reason": "CALL_019 shares the Q4-deadline urgency pattern, cited here only for the timing pressure dynamic, not the objection type."
+    }
+  ],
+  "coaching_feedback": [
+    "Good job probing for the competitor's actual quote instead of guessing — that number directly shaped the follow-up strategy.",
+    "Consider quantifying the '90-day specialist' claim with a concrete implementation-time figure from a past customer; right now it's an assertion without a number behind it.",
+    "The close was soft — 'Would early next week work' — a more direct ask ('Can we lock Tuesday at 2pm and get your director on the invite?') would reduce the risk of the follow-up slipping."
+  ],
+  "recommended_next_action": "Send the itemized proposal (base platform cost vs. onboarding/support cost) by Friday as promised, and confirm the Tuesday call includes Maya's director given the budget sign-off appears to sit above her.",
+  "suggested_follow_up_email": "Subject: Your itemized proposal, ahead of Tuesday\n\nHi Maya,\n\nThanks again for the time today. As promised, here is the breakdown so you and your director can compare line items directly against the other quote you're reviewing:\n\n- Platform license (annual)\n- Implementation & onboarding (90-day dedicated specialist)\n- Ongoing support tier\n\nI've kept these separate so it's easy to see where the cost difference actually comes from. Given the Q4 planning timeline you mentioned, the dedicated onboarding support typically cuts go-live time roughly in half versus a self-serve rollout — happy to share a reference customer if useful.\n\nLooking forward to Tuesday — let me know if there's a better time once your director confirms.\n\nBest,\nDaniel",
+  "routing_category": "pricing_negotiation",
+  "confidence": 0.58,
+  "risk_level": "Medium",
+  "detected_signals": [
+    "price objection",
+    "competitor comparison in progress",
+    "Q4 deadline pressure",
+    "follow-up scheduled",
+    "decision-maker (director) not yet on call"
+  ],
+  "limitations": "Confidence for this analysis (0.58) fell below the 0.65 auto-approve threshold, primarily because the customer never confirmed the competitor's exact quote or whether her director has veto power over the final decision — both are inferred from indirect statements. The RAG comparison to CALL_019 is included only for the timing-pressure pattern, not the price objection, and should not be read as an outcome prediction. This result requires human review before being sent to the sales manager.",
+  "guardrail_status": "human_review_required"
+}
