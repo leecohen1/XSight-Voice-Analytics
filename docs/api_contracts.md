@@ -2,7 +2,7 @@
 
 This document is the single reference for the four backend services' HTTP contracts, as implemented by their **Phase 6 mock skeletons**. Every endpoint, request/response shape, and validation rule here is real and enforced today; the *content* of `POST` responses (beyond `/health`) is a deterministic, clearly-labeled mock (`"mock": true`) until each service's real logic phase (RAG Service: Phase 12, Call Signal Analyser: Phase 13, Guardrails NeMo rails: Phase 11, LangGraph: Phase 14).
 
-All four services are independently runnable FastAPI apps. See [docker-compose.yml](../docker-compose.yml) for local ports, and `services/<name>/README.md` for service-specific detail.
+All five services are independently runnable FastAPI apps. See [docker-compose.yml](../docker-compose.yml) for local ports, and `services/<name>/README.md` for service-specific detail.
 
 | Service | Port | Health | Main endpoint(s) |
 |---|---|---|---|
@@ -10,6 +10,9 @@ All four services are independently runnable FastAPI apps. See [docker-compose.y
 | `call_signal_analyser` | 8002 | `GET /health` | `POST /analyse-call` |
 | `guardrails_service` | 8003 | `GET /health` | `POST /check/input`, `POST /check/output` |
 | `langgraph_agent` | 8004 | `GET /health` | `POST /agent/run` |
+| `ai_observability_service` | 8005 | `GET /health` | `POST /observability/events`, `GET /observability/summary`, `GET /observability/daily`, `GET /observability/by-stage`, `GET /observability/by-provider`, `GET /observability/calls`, `GET /observability/calls/{call_id}`, `GET /observability/cost-breakdown` |
+
+`ai_observability_service` (renamed from `usage_monitoring_service`) is a real (non-mock) implementation from the day it was added — it is a standalone backend feature (AI Usage, Token, and Cost Monitoring), not part of the four-service analysis pipeline above, and is **not yet wired into the n8n workflow or the frontend** — see its own README's "Known limitations" and `docs/ai_observability_integration_design.md` for the planned (not yet built) n8n integration. Its persistence architecture changed from a local SQLite `usage_events` table to Langfuse-backed tracing — see the README's "Architecture decision" section.
 
 ---
 
@@ -280,12 +283,81 @@ curl -i -X POST http://localhost:8004/agent/run -H "Content-Type: application/js
 
 ---
 
-## Running all four services
+## 5. `ai_observability_service` (port 8005)
+
+Real (non-mock) implementation — AI Usage, Token, and Cost Monitoring backend, renamed from `usage_monitoring_service` and rebuilt on Langfuse (see `services/ai_observability_service/README.md`, "Architecture decision"). Standalone: not called by n8n or the frontend yet — see the README's "Known limitations" and `docs/ai_observability_integration_design.md` for the planned integration. Per-event token/cost/latency telemetry is recorded into Langfuse (traces/spans/generations), not a local table; only `pricing_config` and `infrastructure_cost_config` remain locally SQLite-backed. Every cost figure is a decimal **string**, and every cost is explicitly an estimate, never a provider invoice. No real Langfuse account exists yet in this project — every request below runs with observability in "disabled mode" (a documented no-op) until `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are configured.
+
+### `GET /health`
+
+```bash
+curl http://localhost:8005/health
+```
+
+### `POST /observability/events`
+
+Records one call's trace (spans/generations for each pipeline stage).
+
+```bash
+curl -X POST http://localhost:8005/observability/events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "call_id": "call-abc-123",
+    "workflow_execution_id": "21",
+    "trace_metadata": {"environment": "development", "use_case": "analyze_sales_call"},
+    "events": [{
+      "idempotency_key": "exec-21:information_extraction",
+      "provider": "gemini",
+      "service": "generative_ai",
+      "model": "gemini-3.5-flash",
+      "pipeline_stage": "information_extraction",
+      "use_case": "analyze_sales_call",
+      "input_tokens": 501,
+      "output_tokens": 30,
+      "total_tokens": 531,
+      "audio_duration_seconds": null,
+      "request_count": 1,
+      "latency_ms": 840,
+      "status": "success",
+      "occurred_at": "2026-07-27T12:00:00Z",
+      "metadata": {}
+    }]
+  }'
+```
+
+**Response** — reports `recorded_stage_names` / `rejected` separately; one malformed event never fails the whole batch:
+
+```json
+{
+  "call_id": "call-abc-123",
+  "workflow_execution_id": "21",
+  "trace_id": "a1b2c3d4e5f6...",
+  "observability_enabled": false,
+  "recorded_stage_names": ["information_extraction"],
+  "rejected": [],
+  "recorded_count": 1,
+  "rejected_count": 0
+}
+```
+
+`trace_id` is deterministic per `call_id` — the same `call_id` always maps to the same trace, whether or not Langfuse is enabled (see the README). There is no local per-event row `id` anymore: Langfuse owns that telemetry. A malformed event is reported under `rejected` with per-item reasons, never failing the rest of the batch. `POST /usage/events` (the old path) has been removed — it now returns 404.
+
+### `GET /observability/summary`, `/daily`, `/by-stage`, `/by-provider`, `/calls`, `/calls/{call_id}`, `/cost-breakdown`
+
+All accept `range=today|month` and/or explicit `from`/`to` (ISO 8601, UTC, half-open `[from, to)`); `/observability/calls` additionally supports `status`, `page`, `page_size`. Every response includes `observability_enabled: bool` so a consumer can tell "zero usage this period" apart from "Langfuse isn't configured yet." See `services/ai_observability_service/README.md` for the full field-by-field breakdown and the cost-terminology table (measured usage vs. estimated variable cost vs. allocated fixed cost vs. estimated total cost). `GET /usage/summary` still works as a deprecated, undocumented alias of `GET /observability/summary` for any in-flight caller — new integrations should not use it.
+
+```bash
+curl "http://localhost:8005/observability/summary?range=month"
+curl "http://localhost:8005/observability/cost-breakdown?range=month&allocation_method=flat_monthly"
+```
+
+---
+
+## Running all five services
 
 ```bash
 docker compose up -d
-docker compose ps            # confirm all four are "healthy"
-bash scripts/test_mock_services.sh
+docker compose ps            # confirm all five are "healthy"
+bash scripts/test_mock_services.sh   # covers the original four services only; ai_observability_service is not yet included in this script
 docker compose down
 ```
 
@@ -294,7 +366,7 @@ Or locally without Docker, one terminal per service:
 ```bash
 cd services/<service_name>
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port <8001|8002|8003|8004>
+uvicorn app.main:app --reload --port <8001|8002|8003|8004|8005>
 ```
 
 See `scripts/test_mock_services.sh` for an automated smoke test covering all four `/health` endpoints, one successful request per main endpoint, and one intentionally invalid request per service (15 checks total).

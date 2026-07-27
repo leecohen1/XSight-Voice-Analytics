@@ -1,10 +1,13 @@
 # XSight local backend services.
-# All four services are independently deployable FastAPI apps; this file
-# just runs them side by side with fixed local ports for curl/Postman
-# testing. No shared network dependency beyond the default compose network.
+# All services are independently deployable FastAPI apps; this file just
+# runs them side by side with fixed local ports for curl/Postman testing.
+# No shared network dependency beyond the default compose network.
 # rag_service is the real Amazon Bedrock Knowledge Base implementation
 # (Phase 12); call_signal_analyser, guardrails_service, and langgraph_agent
-# remain Phase 6 mock skeletons.
+# remain Phase 6 mock skeletons. ai_observability_service is a standalone
+# backend feature (AI Usage, Token, and Cost Monitoring) outside the
+# four-service analysis pipeline -- not called by n8n or the frontend yet;
+# see its own README.
 
 services:
   rag_service:
@@ -74,6 +77,41 @@ services:
       - "8004:8004"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8004/health', timeout=2).status==200 else 1)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  ai_observability_service:
+    build:
+      context: ./services/ai_observability_service
+    container_name: xsight-ai-observability-service
+    ports:
+      - "8005:8005"
+    environment:
+      - AI_OBSERVABILITY_DB_PATH=/service/data/ai_observability.db
+      - MAX_EVENTS_PER_BATCH=100
+      # Both keys unset by default -- observability runs in "disabled mode"
+      # (a documented no-op, see app/langfuse_client.py) until real
+      # Langfuse credentials are supplied via the host shell/environment or
+      # a .env file at the compose project root (gitignored, never a value
+      # written into this tracked file).
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL:-https://cloud.langfuse.com}
+      - LANGFUSE_ENVIRONMENT=${LANGFUSE_ENVIRONMENT:-development}
+      - LANGFUSE_RELEASE=${LANGFUSE_RELEASE:-}
+      - LANGFUSE_TIMEOUT_SECONDS=${LANGFUSE_TIMEOUT_SECONDS:-3.0}
+    volumes:
+      # Persists the SQLite file (pricing_config + infrastructure_cost_config
+      # only) across container restarts/rebuilds. Bind mount (not a named
+      # volume) to match this repo's existing pattern (see rag_service's
+      # ./data:/data mount above); the database file itself is gitignored,
+      # never committed.
+      - ./services/ai_observability_service/data:/service/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8005/health', timeout=2).status==200 else 1)"]
       interval: 15s
       timeout: 3s
       retries: 3

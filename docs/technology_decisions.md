@@ -174,6 +174,18 @@ The two files share a compatible column schema (`call_signal_training.csv` omits
 
 ---
 
+## AI Usage, Token, and Cost Observability — Langfuse
+
+**Standalone service, not part of the four-service analysis pipeline** — `services/ai_observability_service` (see its own README's "Architecture decision" section and `docs/ai_observability_integration_design.md`). Not called by n8n or the frontend yet.
+
+**Alternatives considered:** a local SQLite `usage_events` table (this service's original design, one row per measured usage event, aggregated by hand-written SQL); a hosted LLM-observability platform other than Langfuse (e.g. Helicone, LangSmith).
+
+**Why chosen:** Langfuse owns per-event token/cost/latency telemetry as the single source of truth (traces, with nested span/generation observations, one trace per analyzed call) instead of this project maintaining its own parallel aggregation logic. `pricing_config` and `infrastructure_cost_config` remain this service's own responsibility, since Langfuse has no equivalent for either — Langfuse only ever knows about cost attributable to a specific LLM generation, never a flat monthly infrastructure spend independent of call volume.
+
+**Trade-off accepted:** An external dependency and network call for observability, isolated with a documented "disabled mode" (see `app/langfuse_client.py`) so a missing or misconfigured Langfuse account degrades to "no telemetry recorded," never a broken pipeline. As of this decision, no real Langfuse account has been created — the integration is built and unit-tested against mocked SDK responses, not yet live-verified against a real Langfuse project.
+
+---
+
 ## Summary table
 
 | Layer | Chosen | Key alternative(s) considered | Primary reason |
@@ -188,4 +200,5 @@ The two files share a compatible column schema (`call_signal_training.csv` omits
 | Agent | LangGraph — multi-step reasoning over pre-fetched evidence | Reasoning folded into the Final Analysis prompt, LangGraph as orchestrator, LangChain AgentExecutor | Explicit, inspectable reasoning graph, structured `reasoning_steps`/`evidence_conflicts`; does not call other services itself |
 | Local assistant | Ollama (the project's only local LLM runtime since the Phase 5C RAG decision) | Reuse the RAG service's local model, call Gemini | Simple conversational runtime, kept independent from the analysis pipeline |
 | Data | Two CSV files (RAG corpus + classifier training) + S3 + Amazon Bedrock Knowledge Base | SQLite/Postgres, one shared CSV file | Sufficient for dataset size, trivial to version and inspect; purposes kept separate |
+| AI observability (standalone, not yet wired into the pipeline) | Langfuse (traces/spans/generations) + local SQLite for `pricing_config`/`infrastructure_cost_config` | Local SQLite `usage_events` table (original design), Helicone, LangSmith | Single source of truth for per-event token/cost/latency telemetry; no parallel aggregation logic to maintain; fixed infra cost has no Langfuse equivalent, so it stays local |
 | Deployment | Docker → AWS EC2 | Managed PaaS, serverless | Persistent processes for loaded models, local/prod parity |

@@ -89,6 +89,8 @@ chroma_data/
 **/chroma_db/
 *.sqlite3
 *.duckdb
+*.db
+services/ai_observability_service/data/
 
 ## ==============================
 ## Audio files

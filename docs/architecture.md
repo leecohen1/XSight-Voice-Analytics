@@ -218,6 +218,10 @@ The same Docker Compose configuration is deployed to a single AWS EC2 instance, 
 | Output guardrails flag the result | invented facts, missing citations, overconfident claims | `flagged` or `human_review_required` depending on severity |
 | Any FastAPI service unreachable/erroring | infra issue | calling node fails; webhook returns an error response (exact retry/error-handling behavior finalized at Phase 10) |
 
+## 8a. Standalone services outside the core pipeline
+
+**`services/ai_observability_service`** (port 8005) is not part of the request lifecycle described above — it is a separate, standalone backend feature (AI Usage, Token, and Cost Monitoring) that is not called by n8n or the frontend today. It records one Langfuse trace per analyzed call (spans/generations for each pipeline stage) and serves aggregation endpoints combining Langfuse-measured LLM usage/cost with locally-configured fixed infrastructure cost — see [technology_decisions.md](technology_decisions.md#ai-usage-token-and-cost-observability--langfuse) for the Langfuse decision and `docs/ai_observability_integration_design.md` for how it would map onto the pipeline stages above if wired in (a design document only — no live n8n edits have been made). It is deliberately excluded from the Mermaid diagram and component matrix above, which describe the CLAUDE.md-canonical four-service analysis pipeline only.
+
 ## 8. Open items carried from technology decisions
 
 - n8n-to-localhost connectivity approach for development (Phase 9) — still open; AssemblyAI itself (the transcription provider) was decided at Phase 9, Iteration 1, and the diarization it provides confirms `agent_talk_ratio` is computable.
