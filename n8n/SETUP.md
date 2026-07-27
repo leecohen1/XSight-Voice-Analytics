@@ -2,51 +2,57 @@
 
 Setup instructions for the live workflow `XSight - Full Pipeline (Nodes 1-16) - Intake to Final Analysis and Routing` (n8n Cloud workflow ID `RBII7JvRDFWwy98x`), exported to `workflows/phase9_16_full_pipeline_intake_to_final_analysis.json`. This supersedes the old Iteration 1 setup notes below for the connectivity/credential steps; the AssemblyAI section of that original file is still accurate and repeated here for completeness.
 
-**Everything through node 15 (the Router) has been verified with simulated end-to-end test executions** (real Code/Set/IF logic, simulated external responses for AssemblyAI/Gemini/RAG/Call-Signal-Analyser/LangGraph) — see `README.md`'s "Verified test runs" section. **A fully live run (real credentials, real network calls to all four services) has not been executed** — the steps below are exactly what's needed to do that.
+**Update — a fully live run has since been executed and verified.** All steps below (Gemini credential, backend service URLs) are now complete for the current connected n8n instance; this document originally described what blocked a live run, and now doubles as the record of exactly what was done to unblock it, plus what a *fresh* n8n instance (a new environment, disaster recovery, onboarding) would still need to redo. See `docs/PROGRESS.md`'s "Demo-day cross-phase push" entry for the live execution result and the four real bugs found and fixed along the way. The original framing is otherwise preserved below, since the instructions themselves are still exactly what a fresh setup needs.
+
+**Everything through node 15 (the Router) was first verified with simulated end-to-end test executions** (real Code/Set/IF logic, simulated external responses for AssemblyAI/Gemini/RAG/Call-Signal-Analyser/LangGraph) — see `README.md`'s "Verified test runs" section — before the live run described above superseded it.
 
 ---
 
-## 1. Gemini credential (blocks a live run)
+## 1. Gemini credential — done for the current instance; needed again on any fresh import
 
-Three nodes need a Gemini credential that does **not exist yet** in the connected n8n instance:
+Three nodes need a Gemini credential:
 
 - `Gemini Information Extractor`
 - `AI Agent Node - Classify and Enrich`
 - `Gemini Final Analysis Chain`
 
-All three reference a credential named exactly **`Gemini API - XSight`** (n8n credential type `Google Gemini(PaLM) Api`, internally `googlePalmApi`). To fix:
+**Current status:** all three now have a real credential (`Google Gemini(PaLM) Api account`) attached and confirmed working via a real live execution, targeting `modelId: models/gemini-3.5-flash`. This was done manually in the n8n editor UI — attaching it programmatically via the n8n MCP tools' `setNodeCredential` operation was attempted and failed silently three times (confirmed reproducible, isolated from other changes) — a tool limitation, not a sign the workflow itself was misconfigured.
+
+**Important, confirmed limitation:** the credential *reference* cannot be read back through the n8n API for this specific node type, at all — so `workflows/phase9_16_full_pipeline_intake_to_final_analysis.json` contains no `credentials` field on these three nodes, even though the live workflow has it attached and working. **Importing this file does NOT restore the Gemini credential.** The three Gemini nodes must be manually reattached to a working credential before activating or executing the imported workflow — without this, every Gemini call will fail immediately on the first real or test execution. **Anyone importing that file into a fresh n8n instance must redo this step**:
 
 1. In n8n, go to **Credentials → Add Credential → Google Gemini(PaLM) Api**.
-2. Name it exactly `Gemini API - XSight` (or bind the existing unresolved reference to whatever credential you create — n8n will prompt you to select one for each of the three nodes since the reference currently has no ID).
+2. Name it whatever you like (the exported workflow's reference has no ID to match against, so n8n will prompt you to select a credential for each of the three nodes on import).
 3. Paste a real Gemini API key (from Google AI Studio / Google Cloud).
 4. Open each of the three nodes and confirm the credential is now resolved (no red warning icon).
-5. Each node currently targets `modelId: models/gemini-2.5-flash`. This has **not been confirmed reachable** with a real key/region — open each Gemini node and verify the model is available to your key, adjusting if needed.
+5. Each node targets `modelId: models/gemini-3.5-flash`, confirmed working with a real key in this project's own instance — if unavailable to your key/region, pick an available equivalent.
 
 **Do not** treat any placeholder/mock string as a working key — the workflow will not call Gemini successfully until a real key is bound.
 
 ---
 
-## 2. Backend service URLs (blocks a live run for nodes 9, 10, 12)
+## 2. Backend service URLs — done for the current instance
 
-Three environment variables must be set to URLs n8n can actually reach:
+**Current status:** all three URLs are hardcoded directly into each HTTP Request node's `url` parameter (no `$env.*` expression remains — this was a deliberate choice for demo reliability, since n8n Cloud environment variables added an extra point of failure without adding value once the URLs were confirmed stable):
 
-| Variable | Used by | Notes |
-|---|---|---|
-| `RAG_SERVICE_URL` | `HTTP Request - RAG Service` (node 9) | No trailing slash. Real service (Amazon Bedrock KB) — already deployed per `docs/PROGRESS.md`, but **this build could not confirm which host/port it's reachable at from n8n**. |
-| `CALL_SIGNAL_ANALYSER_URL` | `HTTP Request - Call Signal Analyser` (node 10) | No trailing slash. Per `docs/PROGRESS.md`, still a Phase 6 mock skeleton as of this build — confirm it's actually running somewhere reachable before testing live. |
-| `LANGGRAPH_AGENT_URL` | `HTTP Request - LangGraph Agent` (node 12) | No trailing slash. Per `docs/PROGRESS.md`, still a Phase 6 mock skeleton as of this build. |
+| Node | Live URL |
+|---|---|
+| `HTTP Request - RAG Service` (node 9) | `http://3.20.223.245:8001/query` |
+| `HTTP Request - Call Signal Analyser` (node 10) | `http://18.117.114.95:8002/analyse-call` |
+| `HTTP Request - LangGraph Agent` (node 12) | `http://18.117.114.95:8004/agent/run` |
+| `HTTP Request - Pre-Transcription Guardrails` (node 2, unchanged from the earlier iteration) | `http://3.151.162.120:8003/check/input` |
 
-**What we know for certain:** `guardrails_service` is deployed to a real AWS EC2 instance and the existing pre-transcription guardrails node is hardcoded to `http://3.151.162.120:8003` (confirmed by reading the live workflow's node parameters directly). **What we do not know:** whether `rag_service`, `call_signal_analyser`, and `langgraph_agent` are deployed on that same EC2 host on ports 8001/8002/8004 (matching `docker-compose.yml`'s port assignments), or are only runnable locally. **Before setting these env vars, verify with curl**, e.g.:
+`call_signal_analyser` and `langgraph_agent` were deployed as live Docker containers on the `18.117.114.95` EC2 host during this session (ports 8002/8004 opened on that host's security group via the AWS API); `rag_service` and `guardrails_service` were already deployed separately, as documented in `docs/PROGRESS.md`. All four were confirmed reachable with `curl .../health` before being wired in.
+
+**If re-importing this workflow into a fresh n8n instance or a redeployed set of services**, verify each URL still responds before relying on it:
 
 ```bash
-curl http://3.151.162.120:8001/health   # if this responds, RAG_SERVICE_URL=http://3.151.162.120:8001
-curl http://3.151.162.120:8002/health   # if this responds, CALL_SIGNAL_ANALYSER_URL=http://3.151.162.120:8002
-curl http://3.151.162.120:8004/health   # if this responds, LANGGRAPH_AGENT_URL=http://3.151.162.120:8004
+curl http://3.20.223.245:8001/health
+curl http://18.117.114.95:8002/health
+curl http://18.117.114.95:8004/health
+curl http://3.151.162.120:8003/health
 ```
 
-If any of those don't respond, that service is likely only running locally via `docker compose up -d` (see `docs/api_contracts.md`), in which case it needs the same tunnel treatment as `guardrails_service` originally did: stand up ngrok or a Cloudflare Tunnel pointed at the relevant local port (8001/8002/8004) and set the corresponding env var to the tunnel's public HTTPS URL. **This step could not be completed from this environment** — no shell access to the actual service hosts or ability to start a tunnel from here. This is the single manual step most likely to block a fully live end-to-end test today.
-
-Set these in n8n Cloud under **Settings → Environment Variables**, or as container environment variables if running n8n locally via Docker Compose.
+If a service has moved or been redeployed elsewhere, update the corresponding node's `url` parameter directly (or reintroduce an `$env.*` expression and set it in n8n Cloud under **Settings → Environment Variables**, if centralizing these again is preferred over hardcoding).
 
 ---
 
@@ -59,14 +65,14 @@ An `AssemblyAI` credential (type `httpHeaderAuth`) already exists in the connect
 ## 4. Import / activation steps
 
 1. If working from a fresh n8n instance instead of the already-connected one: **Workflows → Import from File**, select `n8n/workflows/phase9_16_full_pipeline_intake_to_final_analysis.json`.
-2. Complete steps 1 and 2 above (Gemini credential, three service URLs).
-3. Test with a real submission against the Webhook Trigger's Test URL (multipart form: `audio_file`, `agent_name`, `call_date`, optional `customer_name`/`notes` — see `examples.md`).
+2. Complete steps 1 and 2 above (Gemini credential — required again on fresh import; service URLs — already hardcoded, verify reachability).
+3. Test with a real submission against the Webhook Trigger's URL (multipart form: `audio_file`, `agent_name`, `call_date`, optional `customer_name`/`notes` — see `examples.md`).
 4. Confirm the response is a `200` with the complete final-output JSON (`guardrail_status: "pass"` or `"human_review_required"`), or a structured `error` response if something upstream failed — **never a raw n8n exception**.
-5. Only then consider activating the workflow (**Active** toggle) for anything beyond manual/test-mode runs.
+5. **Current status: the connected instance's workflow is already Active** and has been run successfully against real production traffic (execution `21`). On a fresh import, only activate after confirming step 3/4 succeed in test mode first.
 
-## 5. What "done" looks like without a live run
+## 5. What "done" looks like — now includes a real live run
 
-Because of the two open items above (Gemini credential, three service URLs), this build's verification is a **simulated end-to-end test**, not a live one: `test_workflow` executed every Code/Set/IF node for real and substituted realistic mock responses only for the four external HTTP/Gemini calls. See `README.md`'s "Verified test runs" for exact results (execution IDs `15` auto-pass, `16` human-review-required). Once sections 1 and 2 above are completed, the same webhook payload should produce an equivalent live result — nothing in the node logic itself depends on the calls being simulated.
+This build's verification started as a **simulated end-to-end test** (`test_workflow` executed every Code/Set/IF node for real, substituting realistic mock responses only for the four external HTTP/Gemini calls — see `README.md`'s "Verified test runs" for those results, execution IDs `15`/`16`) and has since been superseded by a **fully live run**: sections 1 and 2 above were completed, and the same kind of webhook payload (real synthesized audio, real form fields) produced a complete, correctly-routed final analysis with no simulated data anywhere in the chain (execution `21`). Getting there required finding and fixing four real bugs live against this exact workflow — see `docs/PROGRESS.md`'s "Demo-day cross-phase push" entry for the full account, and `docs/FULL_PROJECT_AUDIT.md` for the broader audit it prompted (including the finding that this workflow's own git-tracked export had fallen out of sync with these fixes — since resolved by the synchronization documented there).
 
 ---
 
