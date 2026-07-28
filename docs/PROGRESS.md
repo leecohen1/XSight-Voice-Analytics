@@ -319,6 +319,38 @@ every key before any Get/Put/List (and rejects `..` traversal); and tests
 assert both. The date partition means an Overview window lists only the 2-3
 month prefixes it touches instead of scanning the bucket.
 
+**Canonical call_id.** n8n now mints `CALL_<uuid4>` in `Capture Start Time`
+and returns it; `$execution.id` is retained separately as
+`workflow_execution_id` for observability correlation only. The frontend's
+`XS-100N` client-generated scheme is gone — `POST /calls` rejects it and a
+test pins that. Historical seed rows keep their `CALL_001`..`CALL_024`
+identity, so a `similar_calls` citation and a stored record refer to the same
+call.
+
+**Deterministic attention, never model-generated.** A documented precedence
+order (evidence_conflict > human_review > critical_coaching >
+customer_dissatisfaction > recoverable_opportunity > low_priority) and a
+0-100 priority-score formula, implemented identically in `app/attention.py`
+and in the n8n Router node. The service recomputes both blocks on write, so a
+caller cannot inflate its own priority and the stored record can never drift
+from the formula. Missing inputs contribute zero — a null confidence never
+scores as low confidence, a null risk level never as High.
+
+**n8n contract (tracked JSON only; the live Cloud workflow was not touched).**
+46 -> 50 nodes: submission metadata carried forward; the Router derives
+attention/recovery and emits the new envelope
+(`call_id, created_at, call_date, agent_name, customer_name, status,
+router_reasons, analysis`); a new `Build Persistence Payload` ->
+`HTTP Request - Call Data Service` branch with `onError: continueRegularOutput`
+and a 5s timeout, so a storage failure changes only `persistence.persisted`
+and never costs the user their analysis; `Build Success Response` became a
+Code node to attach that result. Validated by a 38-check script (structure,
+connections, envelope fields, persistence-branch safety, RAG path unchanged,
+**no S3 write / no Bedrock ingestion / no Bedrock prefix reference anywhere**)
+plus `node --check` on all 14 Code nodes. The Router's JS was additionally
+dry-run in Node against three mocked payloads and matched the Python
+implementation exactly.
+
 **Deterministic historical seed.** `scripts/seed_historical_calls.py` converts
 the 24-call corpus without calling Gemini, AssemblyAI, Bedrock, or the
 pipeline, and without modifying the CSV. The CSV has no date column, so dates

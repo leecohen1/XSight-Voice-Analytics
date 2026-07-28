@@ -118,6 +118,42 @@
               "name": "started_at_ms",
               "value": "={{ $now.toMillis() }}",
               "type": "number"
+            },
+            {
+              "id": "2",
+              "name": "call_id",
+              "value": "={{ 'CALL_' + 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c){ var r = Math.random() * 16 | 0; var v = (c === 'x' ? r : (r & 0x3 | 0x8)); return v.toString(16); }) }}",
+              "type": "string"
+            },
+            {
+              "id": "3",
+              "name": "workflow_execution_id",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "4",
+              "name": "submission_agent_name",
+              "value": "={{ $json.body && $json.body.agent_name ? $json.body.agent_name : '' }}",
+              "type": "string"
+            },
+            {
+              "id": "5",
+              "name": "submission_customer_name",
+              "value": "={{ $json.body && $json.body.customer_name ? $json.body.customer_name : '' }}",
+              "type": "string"
+            },
+            {
+              "id": "6",
+              "name": "submission_call_date",
+              "value": "={{ $json.body && $json.body.call_date ? $json.body.call_date : '' }}",
+              "type": "string"
+            },
+            {
+              "id": "7",
+              "name": "submission_original_filename",
+              "value": "={{ $binary && $binary.audio_file && $binary.audio_file.fileName ? $binary.audio_file.fileName : '' }}",
+              "type": "string"
             }
           ]
         },
@@ -131,12 +167,14 @@
       "position": [
         -1568,
         -128
-      ]
+      ],
+      "notes": "Mints the canonical business call_id (CALL_<uuid4>) that the final response, call_data_service and the frontend all use. $execution.id is kept separately as workflow_execution_id for observability correlation only -- it is never the public id. Also carries submission metadata forward so the final response and the persisted record can report agent/customer/date/filename."
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const item = $input.item;\nconst binaryKeys = Object.keys(item.binary || {});\n\nif (binaryKeys.length === 0) {\n  throw new Error('binary_missing: no binary audio file found in the incoming request. Expected a multipart/form-data field named \"audio_file\".');\n}\n\nlet selectedKey;\nif (binaryKeys.includes('audio_file')) {\n  selectedKey = 'audio_file';\n} else if (binaryKeys.includes('audio_file0')) {\n  selectedKey = 'audio_file0';\n} else {\n  selectedKey = binaryKeys[0];\n}\n\nreturn {\n  json: item.json,\n  binary: {\n    audio_file: item.binary[selectedKey]\n  }\n};"
+        "jsCode": "const item = $input.item;\nconst binaryKeys = Object.keys(item.binary || {});\n\nif (binaryKeys.length === 0) {\n  throw new Error('binary_missing: no binary audio file found in the incoming request. Expected a multipart/form-data field named \"audio_file\".');\n}\n\nlet selectedKey;\nif (binaryKeys.includes('audio_file')) {\n  selectedKey = 'audio_file';\n} else if (binaryKeys.includes('audio_file0')) {\n  selectedKey = 'audio_file0';\n} else {\n  selectedKey = binaryKeys[0];\n}\n\nreturn {\n  json: item.json,\n  binary: {\n    audio_file: item.binary[selectedKey]\n  }\n};",
+        "language": "javaScript"
       },
       "id": "346375f1-38c9-4726-a1c8-974261a61dc9",
       "name": "Normalize Binary Input",
@@ -330,7 +368,7 @@
     {
       "parameters": {
         "mode": "raw",
-        "jsonOutput": "={{ { transcription: { transcript_id: $json.id ?? null, provider: \"assemblyai\", status: $json.status ?? null, language_code: $json.language_code ?? null, confidence: $json.confidence ?? null, duration_ms: ($json.audio_duration !== undefined && $json.audio_duration !== null) ? Math.round($json.audio_duration * 1000) : null, full_text: $json.text ?? null, utterances: ($json.utterances ?? []).map(u => ({ speaker: u.speaker != null ? \"Speaker \" + u.speaker : null, text: u.text ?? null, start_ms: u.start ?? null, end_ms: u.end ?? null, confidence: u.confidence ?? null })) } } }}",
+        "jsonOutput": "={{ { transcription: { transcript_id: $json.id ?? null, provider: \"assemblyai\", speech_model: $json.speech_model ?? null, status: $json.status ?? null, language_code: $json.language_code ?? null, confidence: $json.confidence ?? null, duration_ms: ($json.audio_duration !== undefined && $json.audio_duration !== null) ? Math.round($json.audio_duration * 1000) : null, full_text: $json.text ?? null, utterances: ($json.utterances ?? []).map(u => ({ speaker: u.speaker != null ? \"Speaker \" + u.speaker : null, text: u.text ?? null, start_ms: u.start ?? null, end_ms: u.end ?? null, confidence: u.confidence ?? null })) }, transcription_completed_at_ms: $now.toMillis() } }}",
         "options": {}
       },
       "id": "a02b110b-d1a4-4286-942f-3366bf95243f",
@@ -473,7 +511,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const transcript = $json.tagged_transcript || '';\nconst lengthOk = transcript.length >= 20;\nconst injectionPatterns = [/ignore (all|any|previous|the above) instructions/i, /system prompt/i, /jailbreak/i, /disregard (all|the above)/i, /you are now/i, /act as (an? )?(unrestricted|unfiltered)/i];\nconst promptInjectionDetected = injectionPatterns.some(r => r.test(transcript));\nconst offensivePatterns = [/\\bfuck\\b/i, /\\bshit\\b/i, /\\basshole\\b/i, /\\bidiot\\b/i];\nconst offensiveDetected = offensivePatterns.some(r => r.test(transcript));\nconst salesKeywords = /\\b(price|pricing|cost|contract|deal|purchase|subscription|demo|proposal|crm|quote|discount|renewal|budget|sales|product|solution|onboarding|trial)\\b/i;\nconst possibleOffTopic = !salesKeywords.test(transcript);\n\nconst reasons = [];\nif (!lengthOk) reasons.push('transcript_too_short');\nif (promptInjectionDetected) reasons.push('prompt_injection_detected');\nif (offensiveDetected) reasons.push('offensive_content_detected');\nif (possibleOffTopic) reasons.push('possible_off_topic');\n\nconst pass = lengthOk && !promptInjectionDetected && !offensiveDetected && !possibleOffTopic;\n\nreturn [{\n  json: {\n    ...$json,\n    post_transcription_check: {\n      pass,\n      reasons,\n      note: 'Inline deterministic n8n check (Code node) -- not a call to guardrails_service, which does not implement a post_transcription stage yet.'\n    }\n  }\n}];\n",
+        "jsCode": "const transcript = $json.tagged_transcript || '';\nconst lengthOk = transcript.length >= 20;\nconst injectionPatterns = [/ignore (all|any|previous|the above) instructions/i, /system prompt/i, /jailbreak/i, /disregard (all|the above)/i, /you are now/i, /act as (an? )?(unrestricted|unfiltered)/i];\nconst promptInjectionDetected = injectionPatterns.some(r => r.test(transcript));\nconst offensivePatterns = [/\\bfuck\\b/i, /\\bshit\\b/i, /\\basshole\\b/i, /\\bidiot\\b/i];\nconst offensiveDetected = offensivePatterns.some(r => r.test(transcript));\nconst salesKeywords = /\\b(price|pricing|cost|contract|deal|purchase|subscription|demo|proposal|crm|quote|discount|renewal|budget|sales|product|solution|onboarding|trial)\\b/i;\nconst possibleOffTopic = !salesKeywords.test(transcript);\n\nconst reasons = [];\nif (!lengthOk) reasons.push('transcript_too_short');\nif (promptInjectionDetected) reasons.push('prompt_injection_detected');\nif (offensiveDetected) reasons.push('offensive_content_detected');\nif (possibleOffTopic) reasons.push('possible_off_topic');\n\nconst pass = lengthOk && !promptInjectionDetected && !offensiveDetected && !possibleOffTopic;\n\nreturn [{\n  json: {\n    ...$json,\n    post_transcription_check: {\n      pass,\n      reasons,\n      note: 'Inline deterministic n8n check (Code node) -- not a call to guardrails_service, which does not implement a post_transcription stage yet.'\n    },\n    information_extraction_started_at_ms: Date.now()\n  }\n}];\n",
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
@@ -531,8 +569,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2080,
-        128
+        2096,
+        -128
       ]
     },
     {
@@ -587,13 +625,13 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2320,
-        128
+        2608,
+        96
       ]
     },
     {
       "parameters": {
-        "jsCode": "function extractText(item) {\n  const candidates = [item.text, item.output, item.response, item.message, item && item.content && item.content.parts && item.content.parts[0] && item.content.parts[0].text, item && item.candidates && item.candidates[0] && item.candidates[0].content && item.candidates[0].content.parts && item.candidates[0].content.parts[0] && item.candidates[0].content.parts[0].text];\n  for (const c of candidates) { if (typeof c === 'string' && c.trim().length > 0) return c; }\n  return null;\n}\nfunction parseJsonLoose(text) {\n  if (!text) return null;\n  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();\n  try { return JSON.parse(cleaned); } catch (e) {\n    const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n    if (match) { try { return JSON.parse(match[0]); } catch (e2) { return null; } }\n    return null;\n  }\n}\nconst raw = extractText($json);\nlet parsed = parseJsonLoose(raw);\nconst VALID_INTENT = ['high','medium','low','unclear'];\nconst VALID_OBJECTION = ['price','timing','trust','competitor','no_need','authority','integration','security','other','none'];\nconst VALID_SENTIMENT = ['positive','neutral','negative','mixed'];\nconst VALID_CLOSING = ['strong','medium','weak','none'];\nlet extraction_parse_error = null;\nif (!parsed || typeof parsed !== 'object') {\n  extraction_parse_error = 'gemini_response_not_valid_json';\n  parsed = {};\n}\nconst extraction = {\n  customer_intent: VALID_INTENT.includes(parsed.customer_intent) ? parsed.customer_intent : 'unclear',\n  main_objection: VALID_OBJECTION.includes(parsed.main_objection) ? parsed.main_objection : 'other',\n  customer_sentiment: VALID_SENTIMENT.includes(parsed.customer_sentiment) ? parsed.customer_sentiment : 'neutral',\n  closing_attempt: VALID_CLOSING.includes(parsed.closing_attempt) ? parsed.closing_attempt : 'none',\n  key_sales_events: Array.isArray(parsed.key_sales_events) ? parsed.key_sales_events : [],\n  call_category: typeof parsed.call_category === 'string' ? parsed.call_category : 'uncategorized',\n};\nreturn [{ json: { extraction, extraction_raw_text: raw, extraction_parse_error } }];",
+        "jsCode": "function extractText(item) {\n  const candidates = [item.text, item.output, item.response, item.message, item && item.content && item.content.parts && item.content.parts[0] && item.content.parts[0].text, item && item.candidates && item.candidates[0] && item.candidates[0].content && item.candidates[0].content.parts && item.candidates[0].content.parts[0] && item.candidates[0].content.parts[0].text];\n  for (const c of candidates) { if (typeof c === 'string' && c.trim().length > 0) return c; }\n  return null;\n}\nfunction extractUsage(item) {\n  const candidates = [item && item.usageMetadata, item && item.response && item.response.usageMetadata];\n  for (const c of candidates) {\n    if (c && typeof c === 'object') {\n      return {\n        input_tokens: typeof c.promptTokenCount === 'number' ? c.promptTokenCount : null,\n        output_tokens: typeof c.candidatesTokenCount === 'number' ? c.candidatesTokenCount : null,\n      };\n    }\n  }\n  return { input_tokens: null, output_tokens: null };\n}\nfunction parseJsonLoose(text) {\n  if (!text) return null;\n  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();\n  try { return JSON.parse(cleaned); } catch (e) {\n    const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n    if (match) { try { return JSON.parse(match[0]); } catch (e2) { return null; } }\n    return null;\n  }\n}\nconst raw = extractText($json);\nlet parsed = parseJsonLoose(raw);\nconst VALID_INTENT = ['high','medium','low','unclear'];\nconst VALID_OBJECTION = ['price','timing','trust','competitor','no_need','authority','integration','security','other','none'];\nconst VALID_SENTIMENT = ['positive','neutral','negative','mixed'];\nconst VALID_CLOSING = ['strong','medium','weak','none'];\nlet extraction_parse_error = null;\nif (!parsed || typeof parsed !== 'object') {\n  extraction_parse_error = 'gemini_response_not_valid_json';\n  parsed = {};\n}\nconst extraction = {\n  customer_intent: VALID_INTENT.includes(parsed.customer_intent) ? parsed.customer_intent : 'unclear',\n  main_objection: VALID_OBJECTION.includes(parsed.main_objection) ? parsed.main_objection : 'other',\n  customer_sentiment: VALID_SENTIMENT.includes(parsed.customer_sentiment) ? parsed.customer_sentiment : 'neutral',\n  closing_attempt: VALID_CLOSING.includes(parsed.closing_attempt) ? parsed.closing_attempt : 'none',\n  key_sales_events: Array.isArray(parsed.key_sales_events) ? parsed.key_sales_events : [],\n  call_category: typeof parsed.call_category === 'string' ? parsed.call_category : 'uncategorized',\n};\nreturn [{ json: { extraction, extraction_raw_text: raw, extraction_parse_error, information_extraction_completed_at_ms: Date.now(), information_extraction_usage: extractUsage($json) } }];",
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
@@ -659,8 +697,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2800,
-        128
+        3088,
+        416
       ]
     },
     {
@@ -680,7 +718,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const extractionNode = ($('Parse Gemini Extraction').item.json.extraction) || {};\nconst transcriptNode = $('Build Speaker-Tagged Transcript').item.json;\nconst enrichment = $json.enrichment || {};\n\nconst measured = transcriptNode.audio_features_for_signal_service;\n\nconst ragPayload = {\n  transcript: transcriptNode.tagged_transcript,\n  metadata: {\n    agent_name: transcriptNode.submission_metadata.agent_name || undefined,\n    call_duration_seconds: measured.call_duration_seconds,\n  },\n  top_k: 3,\n  filters: { main_objection: extractionNode.main_objection },\n};\n\nconst signalPayload = {\n  transcript: transcriptNode.tagged_transcript,\n  audio_features: {\n    call_duration_seconds: measured.call_duration_seconds,\n    silence_ratio: measured.silence_ratio,\n    speaking_rate_wpm: measured.speaking_rate_wpm,\n    speech_to_non_speech_ratio: measured.speech_to_non_speech_ratio,\n    agent_talk_ratio: measured.agent_talk_ratio,\n  },\n  structured_fields: {\n    customer_intent: extractionNode.customer_intent,\n    main_objection: extractionNode.main_objection,\n    customer_sentiment: extractionNode.customer_sentiment,\n    closing_attempt: extractionNode.closing_attempt,\n    decision_maker_present: enrichment.decision_maker_present,\n  },\n};\n\nreturn [{ json: { rag_payload: ragPayload, signal_payload: signalPayload, relevant_services: enrichment.relevant_services } }];\n",
+        "jsCode": "const extractionNode = ($('Parse Gemini Extraction').item.json.extraction) || {};\nconst transcriptNode = $('Build Speaker-Tagged Transcript').item.json;\nconst enrichment = $json.enrichment || {};\n\nconst measured = transcriptNode.audio_features_for_signal_service;\n\nconst ragPayload = {\n  transcript: transcriptNode.tagged_transcript,\n  metadata: {\n    agent_name: transcriptNode.submission_metadata.agent_name || undefined,\n    call_duration_seconds: measured.call_duration_seconds,\n  },\n  top_k: 3,\n  filters: { main_objection: extractionNode.main_objection },\n};\n\nconst signalPayload = {\n  transcript: transcriptNode.tagged_transcript,\n  audio_features: {\n    call_duration_seconds: measured.call_duration_seconds,\n    silence_ratio: measured.silence_ratio,\n    speaking_rate_wpm: measured.speaking_rate_wpm,\n    speech_to_non_speech_ratio: measured.speech_to_non_speech_ratio,\n    agent_talk_ratio: measured.agent_talk_ratio,\n  },\n  structured_fields: {\n    customer_intent: extractionNode.customer_intent,\n    main_objection: extractionNode.main_objection,\n    customer_sentiment: extractionNode.customer_sentiment,\n    closing_attempt: extractionNode.closing_attempt,\n    decision_maker_present: enrichment.decision_maker_present,\n  },\n};\n\nreturn [{ json: { rag_payload: ragPayload, signal_payload: signalPayload, relevant_services: enrichment.relevant_services, parallel_calls_started_at_ms: Date.now() } }];\n",
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
@@ -722,7 +760,7 @@
     {
       "parameters": {
         "mode": "raw",
-        "jsonOutput": "={{ { rag: $json } }}",
+        "jsonOutput": "={{ { rag: $json, rag_retrieval_completed_at_ms: $now.toMillis() } }}",
         "options": {}
       },
       "id": "0c720779-79d2-470d-8839-3a5a52b1ce6b",
@@ -731,7 +769,7 @@
       "typeVersion": 3.4,
       "position": [
         3808,
-        -944
+        -960
       ]
     },
     {
@@ -745,8 +783,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        3568,
-        128
+        3824,
+        144
       ]
     },
     {
@@ -765,8 +803,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        3568,
-        -544
+        3344,
+        -256
       ],
       "retryOnFail": true,
       "maxTries": 3,
@@ -777,7 +815,7 @@
     {
       "parameters": {
         "mode": "raw",
-        "jsonOutput": "={{ { signal: $json } }}",
+        "jsonOutput": "={{ { signal: $json, call_signal_analysis_completed_at_ms: $now.toMillis() } }}",
         "options": {}
       },
       "id": "2a8276c8-0742-4b4a-830a-5fdf8d1fe87a",
@@ -785,8 +823,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        3808,
-        -544
+        3824,
+        -560
       ]
     },
     {
@@ -800,8 +838,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        3568,
-        288
+        3824,
+        448
       ]
     },
     {
@@ -822,7 +860,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const merged = $json;\nconst extraction = ($('Parse Gemini Extraction').item.json.extraction) || {};\nconst transcriptNode = $('Build Speaker-Tagged Transcript').item.json;\n\nreturn [{\n  json: {\n    question: 'Why did this call succeed or fail, and what coaching or follow-up does the agent need?',\n    transcript: transcriptNode.tagged_transcript,\n    metadata: transcriptNode.submission_metadata,\n    structured_extraction: extraction,\n    rag_results: {\n      similar_calls: (merged.rag && merged.rag.similar_calls) || [],\n      insight: (merged.rag && merged.rag.insight) || '',\n      citations: (merged.rag && merged.rag.citations) || [],\n    },\n    signal_analysis: merged.signal || {},\n    _merged_for_router: merged,\n  }\n}];\n",
+        "jsCode": "const merged = $json;\nconst extraction = ($('Parse Gemini Extraction').item.json.extraction) || {};\nconst transcriptNode = $('Build Speaker-Tagged Transcript').item.json;\n\nreturn [{\n  json: {\n    question: 'Why did this call succeed or fail, and what coaching or follow-up does the agent need?',\n    transcript: transcriptNode.tagged_transcript,\n    metadata: transcriptNode.submission_metadata,\n    structured_extraction: extraction,\n    rag_results: {\n      similar_calls: (merged.rag && merged.rag.similar_calls) || [],\n      insight: (merged.rag && merged.rag.insight) || '',\n      citations: (merged.rag && merged.rag.citations) || [],\n    },\n    signal_analysis: merged.signal || {},\n    _merged_for_router: merged,\n    langgraph_reasoning_started_at_ms: Date.now(),\n  }\n}];\n",
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
@@ -877,7 +915,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const langgraph = $json;\nconst merged = $('Prepare LangGraph Payload').item.json._merged_for_router || {};\nconst extraction = ($('Parse Gemini Extraction').item.json.extraction) || {};\nconst enrichment = ($('Parse AI Agent Enrichment').item.json.enrichment) || {};\nconst transcriptNode = $('Build Speaker-Tagged Transcript').item.json;\n\nreturn [{\n  json: {\n    tagged_transcript: transcriptNode.tagged_transcript,\n    submission_metadata: transcriptNode.submission_metadata,\n    extraction,\n    enrichment,\n    rag_results: merged.rag || {},\n    signal_analysis: merged.signal || {},\n    langgraph_reasoning: langgraph,\n    clamped_fields: transcriptNode.clamped_fields,\n    pipeline_assumptions: transcriptNode.pipeline_assumptions,\n  }\n}];\n",
+        "jsCode": "const langgraph = $json;\nconst merged = $('Prepare LangGraph Payload').item.json._merged_for_router || {};\nconst extraction = ($('Parse Gemini Extraction').item.json.extraction) || {};\nconst enrichment = ($('Parse AI Agent Enrichment').item.json.enrichment) || {};\nconst transcriptNode = $('Build Speaker-Tagged Transcript').item.json;\n\nreturn [{\n  json: {\n    tagged_transcript: transcriptNode.tagged_transcript,\n    submission_metadata: transcriptNode.submission_metadata,\n    extraction,\n    enrichment,\n    rag_results: merged.rag || {},\n    signal_analysis: merged.signal || {},\n    langgraph_reasoning: langgraph,\n    clamped_fields: transcriptNode.clamped_fields,\n    pipeline_assumptions: transcriptNode.pipeline_assumptions,\n    langgraph_reasoning_completed_at_ms: Date.now(),\n    final_analysis_started_at_ms: Date.now(),\n  }\n}];\n",
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
@@ -948,7 +986,7 @@
     },
     {
       "parameters": {
-        "jsCode": "function extractText(item) {\n  const candidates = [item.text, item.output, item.response, item.message, item && item.content && item.content.parts && item.content.parts[0] && item.content.parts[0].text, item && item.candidates && item.candidates[0] && item.candidates[0].content && item.candidates[0].content.parts && item.candidates[0].content.parts[0] && item.candidates[0].content.parts[0].text];\n  for (const c of candidates) { if (typeof c === 'string' && c.trim().length > 0) return c; }\n  return null;\n}\nfunction parseJsonLoose(text) {\n  if (!text) return null;\n  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();\n  try { return JSON.parse(cleaned); } catch (e) {\n    const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n    if (match) { try { return JSON.parse(match[0]); } catch (e2) { return null; } }\n    return null;\n  }\n}\nconst raw = extractText($json);\nlet parsed = parseJsonLoose(raw);\nlet parse_error = null;\nif (!parsed || typeof parsed !== 'object') { parse_error = 'final_analysis_response_not_valid_json'; parsed = {}; }\n\nconst ctx = $('Assemble Final Analysis Context').item.json;\n\nconst knownGaps = [];\nknownGaps.push('Post-transcription content guardrails were enforced by an inline n8n deterministic check, not the guardrails_service (its POST /check/input does not yet implement a post_transcription stage).');\nknownGaps.push('Output guardrails (POST /check/output) are not implemented by guardrails_service yet; this result has not been independently checked for invented facts or missing citations by that service.');\nif (ctx.clamped_fields && ctx.clamped_fields.length > 0) {\n  knownGaps.push('Audio-derived features (' + ctx.clamped_fields.map(c => c.field).join(', ') + ') were clamped to the Call Signal Analyser mock service accepted numeric ranges and may not reflect this call true measured values.');\n}\nif (ctx.pipeline_assumptions && ctx.pipeline_assumptions.length > 0) {\n  ctx.pipeline_assumptions.forEach(a => knownGaps.push(a));\n}\nif (parse_error) {\n  knownGaps.push('The Final Analysis Chain response could not be parsed as JSON; default/fallback values were substituted for missing fields.');\n}\n\nconst geminiLimitations = (typeof parsed.limitations === 'string' && parsed.limitations.trim()) ? parsed.limitations.trim() : '';\nconst finalLimitations = [geminiLimitations].concat(knownGaps).filter(Boolean).join(' ');\n\nconst finalAnalysis = {\n  transcript: ctx.tagged_transcript,\n  call_summary: typeof parsed.call_summary === 'string' ? parsed.call_summary : 'Summary unavailable -- Final Analysis Chain response could not be parsed.',\n  customer_intent: parsed.customer_intent || ctx.extraction.customer_intent,\n  main_objection: parsed.main_objection || ctx.extraction.main_objection,\n  customer_sentiment: ['positive','neutral','negative'].includes(parsed.customer_sentiment) ? parsed.customer_sentiment : (ctx.extraction.customer_sentiment === 'mixed' ? 'neutral' : ctx.extraction.customer_sentiment),\n  call_outcome: ['Sale','No Sale','Follow-up Needed','Uncertain'].includes(parsed.call_outcome) ? parsed.call_outcome : ((ctx.signal_analysis && ctx.signal_analysis.predicted_outcome) || 'Uncertain'),\n  agent_performance_score: Number.isInteger(parsed.agent_performance_score) ? parsed.agent_performance_score : ((ctx.signal_analysis && ctx.signal_analysis.agent_performance_score) || 3),\n  lead_quality_score: Number.isInteger(parsed.lead_quality_score) ? parsed.lead_quality_score : ((ctx.signal_analysis && ctx.signal_analysis.lead_quality_score) || 3),\n  similar_calls: (ctx.rag_results && ctx.rag_results.similar_calls) || [],\n  coaching_feedback: (Array.isArray(parsed.coaching_feedback) && parsed.coaching_feedback.length > 0) ? parsed.coaching_feedback : ((ctx.langgraph_reasoning && ctx.langgraph_reasoning.coaching_points) || []),\n  recommended_next_action: typeof parsed.recommended_next_action === 'string' ? parsed.recommended_next_action : ((ctx.langgraph_reasoning && ctx.langgraph_reasoning.recommended_next_action) || 'Manual follow-up recommended -- Final Analysis Chain output unavailable.'),\n  suggested_follow_up_email: typeof parsed.suggested_follow_up_email === 'string' ? parsed.suggested_follow_up_email : '',\n  routing_category: typeof parsed.routing_category === 'string' ? parsed.routing_category : ((ctx.enrichment && ctx.enrichment.enriched_call_category) || 'uncategorized'),\n  confidence: typeof parsed.confidence === 'number' ? parsed.confidence : ((ctx.signal_analysis && ctx.signal_analysis.confidence) || 0),\n  risk_level: ['Low','Medium','High'].includes(parsed.risk_level) ? parsed.risk_level : ((ctx.signal_analysis && ctx.signal_analysis.risk_level) || 'Medium'),\n  detected_signals: Array.isArray(parsed.detected_signals) ? parsed.detected_signals : ((ctx.signal_analysis && ctx.signal_analysis.detected_signals) || []),\n  limitations: finalLimitations,\n};\n\nreturn [{ json: { final_analysis: finalAnalysis, rag_results: ctx.rag_results, signal_analysis: ctx.signal_analysis, langgraph_reasoning: ctx.langgraph_reasoning, final_analysis_parse_error: parse_error } }];",
+        "jsCode": "function extractText(item) {\n  const candidates = [item.text, item.output, item.response, item.message, item && item.content && item.content.parts && item.content.parts[0] && item.content.parts[0].text, item && item.candidates && item.candidates[0] && item.candidates[0].content && item.candidates[0].content.parts && item.candidates[0].content.parts[0] && item.candidates[0].content.parts[0].text];\n  for (const c of candidates) { if (typeof c === 'string' && c.trim().length > 0) return c; }\n  return null;\n}\nfunction extractUsage(item) {\n  const candidates = [item && item.usageMetadata, item && item.response && item.response.usageMetadata];\n  for (const c of candidates) {\n    if (c && typeof c === 'object') {\n      return {\n        input_tokens: typeof c.promptTokenCount === 'number' ? c.promptTokenCount : null,\n        output_tokens: typeof c.candidatesTokenCount === 'number' ? c.candidatesTokenCount : null,\n      };\n    }\n  }\n  return { input_tokens: null, output_tokens: null };\n}\nfunction parseJsonLoose(text) {\n  if (!text) return null;\n  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();\n  try { return JSON.parse(cleaned); } catch (e) {\n    const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n    if (match) { try { return JSON.parse(match[0]); } catch (e2) { return null; } }\n    return null;\n  }\n}\nconst raw = extractText($json);\nlet parsed = parseJsonLoose(raw);\nlet parse_error = null;\nif (!parsed || typeof parsed !== 'object') { parse_error = 'final_analysis_response_not_valid_json'; parsed = {}; }\n\nconst ctx = $('Assemble Final Analysis Context').item.json;\n\nconst knownGaps = [];\nknownGaps.push('Post-transcription content guardrails were enforced by an inline n8n deterministic check, not the guardrails_service (its POST /check/input does not yet implement a post_transcription stage).');\nknownGaps.push('Output guardrails (POST /check/output) are not implemented by guardrails_service yet; this result has not been independently checked for invented facts or missing citations by that service.');\nif (ctx.clamped_fields && ctx.clamped_fields.length > 0) {\n  knownGaps.push('Audio-derived features (' + ctx.clamped_fields.map(c => c.field).join(', ') + ') were clamped to the Call Signal Analyser mock service accepted numeric ranges and may not reflect this call true measured values.');\n}\nif (ctx.pipeline_assumptions && ctx.pipeline_assumptions.length > 0) {\n  ctx.pipeline_assumptions.forEach(a => knownGaps.push(a));\n}\nif (parse_error) {\n  knownGaps.push('The Final Analysis Chain response could not be parsed as JSON; default/fallback values were substituted for missing fields.');\n}\n\nconst geminiLimitations = (typeof parsed.limitations === 'string' && parsed.limitations.trim()) ? parsed.limitations.trim() : '';\nconst finalLimitations = [geminiLimitations].concat(knownGaps).filter(Boolean).join(' ');\n\nconst finalAnalysis = {\n  transcript: ctx.tagged_transcript,\n  call_summary: typeof parsed.call_summary === 'string' ? parsed.call_summary : 'Summary unavailable -- Final Analysis Chain response could not be parsed.',\n  customer_intent: parsed.customer_intent || ctx.extraction.customer_intent,\n  main_objection: parsed.main_objection || ctx.extraction.main_objection,\n  customer_sentiment: ['positive','neutral','negative'].includes(parsed.customer_sentiment) ? parsed.customer_sentiment : (ctx.extraction.customer_sentiment === 'mixed' ? 'neutral' : ctx.extraction.customer_sentiment),\n  call_outcome: ['Sale','No Sale','Follow-up Needed','Uncertain'].includes(parsed.call_outcome) ? parsed.call_outcome : ((ctx.signal_analysis && ctx.signal_analysis.predicted_outcome) || 'Uncertain'),\n  agent_performance_score: Number.isInteger(parsed.agent_performance_score) ? parsed.agent_performance_score : ((ctx.signal_analysis && ctx.signal_analysis.agent_performance_score) || 3),\n  lead_quality_score: Number.isInteger(parsed.lead_quality_score) ? parsed.lead_quality_score : ((ctx.signal_analysis && ctx.signal_analysis.lead_quality_score) || 3),\n  similar_calls: (ctx.rag_results && ctx.rag_results.similar_calls) || [],\n  coaching_feedback: (Array.isArray(parsed.coaching_feedback) && parsed.coaching_feedback.length > 0) ? parsed.coaching_feedback : ((ctx.langgraph_reasoning && ctx.langgraph_reasoning.coaching_points) || []),\n  recommended_next_action: typeof parsed.recommended_next_action === 'string' ? parsed.recommended_next_action : ((ctx.langgraph_reasoning && ctx.langgraph_reasoning.recommended_next_action) || 'Manual follow-up recommended -- Final Analysis Chain output unavailable.'),\n  suggested_follow_up_email: typeof parsed.suggested_follow_up_email === 'string' ? parsed.suggested_follow_up_email : '',\n  routing_category: typeof parsed.routing_category === 'string' ? parsed.routing_category : ((ctx.enrichment && ctx.enrichment.enriched_call_category) || 'uncategorized'),\n  confidence: typeof parsed.confidence === 'number' ? parsed.confidence : ((ctx.signal_analysis && ctx.signal_analysis.confidence) || 0),\n  risk_level: ['Low','Medium','High'].includes(parsed.risk_level) ? parsed.risk_level : ((ctx.signal_analysis && ctx.signal_analysis.risk_level) || 'Medium'),\n  detected_signals: Array.isArray(parsed.detected_signals) ? parsed.detected_signals : ((ctx.signal_analysis && ctx.signal_analysis.detected_signals) || []),\n  limitations: finalLimitations,\n};\n\nreturn [{ json: { final_analysis: finalAnalysis, rag_results: ctx.rag_results, signal_analysis: ctx.signal_analysis, langgraph_reasoning: ctx.langgraph_reasoning, final_analysis_parse_error: parse_error, final_analysis_completed_at_ms: Date.now(), final_analysis_usage: extractUsage($json) } }];",
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
@@ -964,7 +1002,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const analysis = $json.final_analysis;\nconst signal = $json.signal_analysis || {};\nconst langgraph = $json.langgraph_reasoning || {};\nconst rag = $json.rag_results || {};\n\nconst routerReasons = [];\nlet guardrailStatus = 'pass';\n\nconst confidence = typeof signal.confidence === 'number' ? signal.confidence : analysis.confidence;\nif (typeof confidence !== 'number' || confidence < 0.65) {\n  routerReasons.push('call_signal_analyser_confidence_below_0.65');\n  guardrailStatus = 'human_review_required';\n}\n\nconst conflicts = Array.isArray(langgraph.evidence_conflicts) ? langgraph.evidence_conflicts : [];\nif (conflicts.length > 0) {\n  routerReasons.push('langgraph_evidence_conflicts_detected');\n  guardrailStatus = 'human_review_required';\n}\n\nconst claimsHistoricalCalls = Array.isArray(analysis.similar_calls) && analysis.similar_calls.length > 0;\nconst hasCitations = Array.isArray(rag.citations) && rag.citations.length > 0;\nif (claimsHistoricalCalls && !hasCitations) {\n  routerReasons.push('missing_historical_call_citations');\n  guardrailStatus = 'human_review_required';\n}\n\nif ($json.final_analysis_parse_error) {\n  routerReasons.push('final_analysis_response_not_parseable');\n  guardrailStatus = 'human_review_required';\n}\n\nrouterReasons.push('output_guardrails_not_implemented_skipped_check');\n\nconst finalOutput = Object.assign({}, analysis, { guardrail_status: guardrailStatus });\nif (guardrailStatus === 'human_review_required' && (!finalOutput.routing_category || finalOutput.routing_category === 'uncategorized')) {\n  finalOutput.routing_category = 'human_review_required';\n}\n\nreturn [{ json: { final_output: finalOutput, router_reasons: routerReasons } }];\n",
+        "jsCode": "const analysis = $json.final_analysis;\nconst signal = $json.signal_analysis || {};\nconst langgraph = $json.langgraph_reasoning || {};\nconst rag = $json.rag_results || {};\nconst ctx = $('Capture Start Time').item.json;\n\n// ---- existing deterministic routing (unchanged behaviour) ----------------\nconst routerReasons = [];\nlet guardrailStatus = 'pass';\n\nconst confidence = typeof signal.confidence === 'number' ? signal.confidence : analysis.confidence;\nif (typeof confidence !== 'number' || confidence < 0.65) {\n  routerReasons.push('call_signal_analyser_confidence_below_0.65');\n  guardrailStatus = 'human_review_required';\n}\n\nconst conflicts = Array.isArray(langgraph.evidence_conflicts) ? langgraph.evidence_conflicts : [];\nif (conflicts.length > 0) {\n  routerReasons.push('langgraph_evidence_conflicts_detected');\n  guardrailStatus = 'human_review_required';\n}\n\nconst claimsHistoricalCalls = Array.isArray(analysis.similar_calls) && analysis.similar_calls.length > 0;\nconst hasCitations = Array.isArray(rag.citations) && rag.citations.length > 0;\nif (claimsHistoricalCalls && !hasCitations) {\n  routerReasons.push('missing_historical_call_citations');\n  guardrailStatus = 'human_review_required';\n}\n\nif ($json.final_analysis_parse_error) {\n  routerReasons.push('final_analysis_response_not_parseable');\n  guardrailStatus = 'human_review_required';\n}\n\nrouterReasons.push('output_guardrails_not_implemented_skipped_check');\n\n// ---- deterministic attention + recovery opportunity ---------------------\n// Mirrors services/call_data_service/app/attention.py exactly. Derived here\n// (never by Gemini) so routing severity can never be model-influenced. The\n// call_data_service recomputes these from the same inputs on write, so the\n// stored record can never drift from this formula.\nconst CATEGORY_BASE = {\n  evidence_conflict: 70,\n  human_review: 60,\n  critical_coaching: 55,\n  customer_dissatisfaction: 45,\n  recoverable_opportunity: 40,\n  low_priority: 0,\n};\nconst OFFER_BY_OBJECTION = {\n  price: 'Prepare an itemized proposal separating platform cost from onboarding cost.',\n  timing: 'Confirm quote validity in writing and book a dated check-in for the next budget cycle.',\n  trust: 'Share security and compliance documentation, and offer a reference customer.',\n  competitor: 'Prepare a side-by-side comparison covering the specific gap the customer named.',\n  authority: 'Request a follow-up with the economic decision maker present.',\n  no_need: 'Share a use-case brief tied to the specific pain the customer described.',\n  integration: 'Book a technical scoping call to confirm the integration path.',\n  security: 'Send the security packet and offer a review call with the security team.',\n};\nconst DEFAULT_OFFER = 'Confirm the outstanding objection with the customer before proposing next steps.';\nconst WINDOW_BY_PRIORITY = {\n  critical: 'within_24_hours',\n  high: 'within_3_days',\n  medium: 'within_1_week',\n  low: 'within_2_weeks',\n};\n\nfunction priorityBand(score) {\n  if (score >= 80) return 'critical';\n  if (score >= 60) return 'high';\n  if (score >= 35) return 'medium';\n  return 'low';\n}\n\nconst lowered = routerReasons.map(r => String(r).toLowerCase());\nconst hasEvidenceConflict = lowered.some(r => r.indexOf('evidence_conflict') !== -1 || r.indexOf('evidence conflict') !== -1);\nconst humanReviewMarkers = ['human_review', 'human review', 'confidence_below', 'missing_historical_call_citations', 'missing_citations', 'not_parseable'];\nconst hasHumanReviewReason = lowered.some(r => humanReviewMarkers.some(m => r.indexOf(m) !== -1));\n\nconst perf = Number.isInteger(analysis.agent_performance_score) ? analysis.agent_performance_score : null;\nconst lead = Number.isInteger(analysis.lead_quality_score) ? analysis.lead_quality_score : null;\nconst conf = typeof analysis.confidence === 'number' ? analysis.confidence : null;\nconst risk = analysis.risk_level || null;\nconst outcome = analysis.call_outcome || null;\nconst sentiment = analysis.customer_sentiment || null;\n\nlet category = 'low_priority';\nlet reasonText = null;\n\nif (hasEvidenceConflict) {\n  category = 'evidence_conflict';\n  reasonText = \"The pipeline's evidence sources disagree on this call; a human must reconcile them.\";\n} else if (guardrailStatus === 'human_review_required' || hasHumanReviewReason) {\n  category = 'human_review';\n  reasonText = 'Routing sent this call to human review before the result can be trusted.';\n} else if (perf !== null && perf <= 2) {\n  category = 'critical_coaching';\n  reasonText = 'Agent performance scored ' + perf + '/5 on this call; coaching is warranted.';\n} else if (sentiment === 'negative') {\n  category = 'customer_dissatisfaction';\n  reasonText = 'Customer sentiment on this call was negative.';\n} else if (lead !== null && lead >= 4 && outcome !== 'Sale') {\n  category = 'recoverable_opportunity';\n  reasonText = 'Lead quality scored ' + lead + '/5 but the call did not close; the opportunity looks recoverable.';\n}\n\nlet attention;\nif (category === 'low_priority') {\n  attention = { required: false, priority: 'low', priority_score: 0, category: 'low_priority', reason: null };\n} else {\n  let score = CATEGORY_BASE[category];\n  if (lead === 5) score += 15; else if (lead === 4) score += 10;\n  if (perf !== null && perf <= 2) score += 10;\n  if (risk === 'High') score += 10; else if (risk === 'Medium') score += 5;\n  if (conf !== null && conf < 0.65) score += 8;\n  if (outcome === 'Follow-up Needed') score += 5;\n  score = Math.max(0, Math.min(100, score));\n  attention = { required: true, priority: priorityBand(score), priority_score: score, category: category, reason: reasonText };\n}\n\nconst recoveryDetected = lead !== null && lead >= 4 && outcome !== null && outcome !== 'Sale';\nlet recoveryOpportunity;\nif (recoveryDetected) {\n  const objectionKey = String(analysis.main_objection || '').trim().toLowerCase();\n  const objectionPhrase = (objectionKey && objectionKey !== 'none') ? objectionKey : 'no explicit objection';\n  recoveryOpportunity = {\n    detected: true,\n    confidence: conf,\n    reason: 'Lead quality ' + lead + \"/5 with outcome '\" + outcome + \"' and \" + objectionPhrase + ' recorded as the main objection.',\n    recommended_offer: OFFER_BY_OBJECTION[objectionKey] || DEFAULT_OFFER,\n    recommended_follow_up_window: WINDOW_BY_PRIORITY[attention.priority],\n  };\n} else {\n  recoveryOpportunity = { detected: false, confidence: null, reason: null, recommended_offer: null, recommended_follow_up_window: null };\n}\n\n// ---- assemble the response envelope -------------------------------------\nconst enrichedAnalysis = Object.assign({}, analysis, {\n  guardrail_status: guardrailStatus,\n  attention: attention,\n  recovery_opportunity: recoveryOpportunity,\n});\nif (guardrailStatus === 'human_review_required' && (!enrichedAnalysis.routing_category || enrichedAnalysis.routing_category === 'uncategorized')) {\n  enrichedAnalysis.routing_category = 'human_review_required';\n}\n\nconst status = guardrailStatus === 'human_review_required'\n  ? 'human_review_required'\n  : (guardrailStatus === 'flagged' ? 'flagged' : 'completed');\n\nconst createdAt = new Date().toISOString();\nconst callDate = (ctx.submission_call_date && String(ctx.submission_call_date).trim())\n  ? String(ctx.submission_call_date).trim()\n  : createdAt.slice(0, 10);\n\nconst finalOutput = {\n  call_id: ctx.call_id,\n  created_at: createdAt,\n  call_date: callDate,\n  agent_name: String(ctx.submission_agent_name || '').trim(),\n  customer_name: (ctx.submission_customer_name && String(ctx.submission_customer_name).trim()) ? String(ctx.submission_customer_name).trim() : null,\n  status: status,\n  router_reasons: routerReasons,\n  analysis: enrichedAnalysis,\n};\n\nreturn [{ json: { final_output: finalOutput, router_reasons: routerReasons } }];\n",
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
@@ -976,22 +1014,23 @@
         5488,
         -752
       ],
-      "notes": "n8n node 15. Implements CLAUDE.md's exact routing rule: confidence < 0.65 OR evidence_conflicts non-empty OR missing citations OR unparseable final analysis -> human_review_required. Output guardrails cannot be checked (not implemented) -- this is recorded in router_reasons, not silently ignored."
+      "notes": "n8n node 15. Implements CLAUDE.md's exact routing rule (confidence < 0.65 OR evidence_conflicts non-empty OR missing citations OR unparseable final analysis -> human_review_required), AND deterministically derives attention + recovery_opportunity using the same formula as services/call_data_service/app/attention.py. Emits the response envelope {call_id, created_at, call_date, agent_name, customer_name, status, router_reasons, analysis}. Gemini never sets guardrail_status, attention, or recovery_opportunity."
     },
     {
       "parameters": {
-        "mode": "raw",
-        "jsonOutput": "={{ $json.final_output }}",
-        "options": {}
+        "jsCode": "// The user-facing response. Always returns the Router's envelope, whether or\n// not persistence succeeded -- a storage problem must never cost the user\n// their analysis. `persistence` reports what actually happened, without\n// leaking any storage internals (bucket, key, AWS error codes).\nconst routerOut = $('Router - Confidence and Category').item.json.final_output;\nconst raw = $json || {};\n\nlet persisted = false;\nlet detail = 'Call data service did not confirm the write.';\nif (raw && raw.call_id && (raw.created === true || raw.overwritten === true)) {\n  persisted = true;\n  detail = raw.overwritten ? 'Existing record updated.' : 'Record stored.';\n} else if (raw && raw.error) {\n  detail = 'Call data service was unreachable; this analysis was returned but not stored.';\n}\n\nconst finalOutput = Object.assign({}, routerOut, {\n  persistence: { persisted: persisted, detail: detail },\n});\n\nreturn [{ json: finalOutput }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
       },
       "id": "7fe33ab9-358f-4297-a23e-f23de594dd90",
       "name": "Build Success Response - Full Analysis",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         5728,
         -752
-      ]
+      ],
+      "notes": "Changed from a Set node to a Code node so the response can report the persistence outcome without an expression-level spread. Always emits the Router envelope; persistence failure only changes persistence.persisted, never whether the user gets their analysis."
     },
     {
       "parameters": {
@@ -1021,10 +1060,85 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4000,
-        704
+        4176,
+        720
       ],
       "notes": "Shared terminal error builder for every new failure branch (nodes 5-15). Fans in from Error - Content Guardrails / Error - Gemini Extraction / Error - AI Agent Enrichment / Error - RAG Service / Error - Call Signal Analyser / Error - LangGraph Agent / Error - Final Analysis, then feeds the existing 'Respond Error' node."
+    },
+    {
+      "id": "8cfd1226-60dc-4ced-8d5d-121752f3d87f",
+      "name": "Build Observability Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5728,
+        -500
+      ],
+      "parameters": {
+        "jsCode": "function iso(ms) {\n  return (typeof ms === 'number') ? new Date(ms).toISOString() : new Date().toISOString();\n}\nfunction stageEvent(executionId, stage, provider, service, opts) {\n  opts = opts || {};\n  const startedMs = opts.startedMs;\n  const completedMs = opts.completedMs;\n  return {\n    idempotency_key: executionId + ':' + stage,\n    provider: provider,\n    service: service,\n    model: opts.model || null,\n    pipeline_stage: stage,\n    use_case: 'analyze_sales_call',\n    input_tokens: (opts.inputTokens !== undefined && opts.inputTokens !== null) ? opts.inputTokens : null,\n    output_tokens: (opts.outputTokens !== undefined && opts.outputTokens !== null) ? opts.outputTokens : null,\n    audio_duration_seconds: (opts.audioDurationSeconds !== undefined && opts.audioDurationSeconds !== null) ? opts.audioDurationSeconds : null,\n    request_count: 1,\n    latency_ms: (typeof startedMs === 'number' && typeof completedMs === 'number') ? (completedMs - startedMs) : null,\n    status: opts.status || 'success',\n    occurred_at: iso(completedMs),\n    metadata: {},\n  };\n}\n\nconst executionId = $execution.id;\nconst captureStart = $('Capture Start Time').item.json;\nconst callId = captureStart.call_id;  // canonical CALL_<uuid4>, not $execution.id\nconst pipelineStartedMs = captureStart.started_at_ms;\n\nlet transcriptionNode = null;\ntry { transcriptionNode = $('Normalize Transcript').item.json; } catch (e) {}\nconst transcription = (transcriptionNode && transcriptionNode.transcription) || {};\nconst transcriptionCompletedMs = transcriptionNode ? transcriptionNode.transcription_completed_at_ms : null;\nconst audioDurationSeconds = (typeof transcription.duration_ms === 'number') ? transcription.duration_ms / 1000 : null;\n\nlet extractionNode = null;\ntry { extractionNode = $('Parse Gemini Extraction').item.json; } catch (e) {}\nlet infoExtractionStartedMs = null;\ntry { infoExtractionStartedMs = $('Post-Transcription Content Check').item.json.information_extraction_started_at_ms; } catch (e) {}\n\nlet prepareDownstreamNode = null;\ntry { prepareDownstreamNode = $('Prepare Downstream Payloads').item.json; } catch (e) {}\nconst parallelCallsStartedMs = prepareDownstreamNode ? prepareDownstreamNode.parallel_calls_started_at_ms : null;\n\nlet ragMergeNode = null;\ntry { ragMergeNode = $('Prepare RAG For Merge').item.json; } catch (e) {}\nconst ragCompletedMs = ragMergeNode ? ragMergeNode.rag_retrieval_completed_at_ms : null;\n\nlet signalMergeNode = null;\ntry { signalMergeNode = $('Prepare Signal For Merge').item.json; } catch (e) {}\nconst signalCompletedMs = signalMergeNode ? signalMergeNode.call_signal_analysis_completed_at_ms : null;\n\nlet langgraphPayloadNode = null;\ntry { langgraphPayloadNode = $('Prepare LangGraph Payload').item.json; } catch (e) {}\nconst langgraphStartedMs = langgraphPayloadNode ? langgraphPayloadNode.langgraph_reasoning_started_at_ms : null;\n\nlet assembleContextNode = null;\ntry { assembleContextNode = $('Assemble Final Analysis Context').item.json; } catch (e) {}\nconst langgraphCompletedMs = assembleContextNode ? assembleContextNode.langgraph_reasoning_completed_at_ms : null;\nconst finalAnalysisStartedMs = assembleContextNode ? assembleContextNode.final_analysis_started_at_ms : null;\n\nlet parseFinalNode = null;\ntry { parseFinalNode = $('Parse Final Analysis Output').item.json; } catch (e) {}\nconst finalAnalysisCompletedMs = parseFinalNode ? parseFinalNode.final_analysis_completed_at_ms : null;\n\nconst infoExtractionUsage = (extractionNode && extractionNode.information_extraction_usage) || {};\nconst finalAnalysisUsage = (parseFinalNode && parseFinalNode.final_analysis_usage) || {};\n\nconst finalOutput = $json.final_output || {};\n\nconst events = [\n  stageEvent(executionId, 'transcription', 'assemblyai', 'transcription', {\n    startedMs: pipelineStartedMs, completedMs: transcriptionCompletedMs,\n    model: transcription.speech_model || null,\n    audioDurationSeconds: audioDurationSeconds,\n    status: (transcription.status === 'completed') ? 'success' : 'partial',\n  }),\n  stageEvent(executionId, 'information_extraction', 'gemini', 'generative_ai', {\n    startedMs: infoExtractionStartedMs, completedMs: extractionNode ? extractionNode.information_extraction_completed_at_ms : null,\n    model: 'gemini-3.5-flash',\n    inputTokens: infoExtractionUsage.input_tokens, outputTokens: infoExtractionUsage.output_tokens,\n    status: (extractionNode && extractionNode.extraction_parse_error) ? 'partial' : 'success',\n  }),\n  stageEvent(executionId, 'rag_retrieval', 'internal', 'rag_service', {\n    startedMs: parallelCallsStartedMs, completedMs: ragCompletedMs,\n  }),\n  stageEvent(executionId, 'call_signal_analysis', 'internal', 'call_signal_analyser', {\n    startedMs: parallelCallsStartedMs, completedMs: signalCompletedMs,\n  }),\n  stageEvent(executionId, 'langgraph_reasoning', 'internal', 'langgraph_agent', {\n    startedMs: langgraphStartedMs, completedMs: langgraphCompletedMs,\n  }),\n  stageEvent(executionId, 'final_analysis', 'gemini', 'generative_ai', {\n    startedMs: finalAnalysisStartedMs, completedMs: finalAnalysisCompletedMs,\n    model: 'gemini-3.5-flash',\n    inputTokens: finalAnalysisUsage.input_tokens, outputTokens: finalAnalysisUsage.output_tokens,\n    status: (parseFinalNode && parseFinalNode.final_analysis_parse_error) ? 'partial' : 'success',\n  }),\n];\n\nconst observability_payload = {\n  call_id: callId,\n  workflow_execution_id: executionId,\n  trace_metadata: {\n    environment: 'production',\n    final_status: (finalOutput.analysis && finalOutput.analysis.guardrail_status) || 'unknown',\n    use_case: 'analyze_sales_call',\n  },\n  events: events,\n};\n\nreturn [{ json: { ...$json, observability_payload } }];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "New (Langfuse instrumentation pass). Assembles the 6-stage observability event batch from timestamps/usage captured on existing nodes via $('Node Name') references. Runs in parallel with Build Success Response - Full Analysis -- never gates the user-facing response."
+    },
+    {
+      "id": "7075900e-f97c-4689-86f5-b3ace34018aa",
+      "name": "HTTP Request - Observability Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5968,
+        -500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://REPLACE_WITH_AI_OBSERVABILITY_SERVICE_URL:8005/observability/events",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.observability_payload }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "notes": "New (Langfuse instrumentation pass). POST /observability/events per ai_observability_service (app/main.py). PLACEHOLDER URL -- ai_observability_service is not deployed anywhere reachable from n8n Cloud yet (no EC2 deployment in this pass, per explicit instruction). Replace with the real reachable URL once deployed. onError: continueErrorOutput means this failing (e.g. unreachable placeholder) never affects the pipeline's real response -- observability must never break call analysis."
+    },
+    {
+      "id": "c1d2e3f4-a5b6-47c8-9d0e-1f2a3b4c5d6e",
+      "name": "Build Persistence Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5728,
+        -1004
+      ],
+      "parameters": {
+        "jsCode": "// Maps the Router's envelope onto call_data_service's POST /calls contract.\n// Pure field mapping -- no business logic; attention/recovery are already\n// deterministically derived by the Router, and the service recomputes them\n// on write anyway.\nconst out = $json.final_output || {};\nreturn [{\n  json: {\n    persistence_payload: {\n      schema_version: '1.0',\n      call_id: out.call_id,\n      source: 'live_analysis',\n      created_at: out.created_at,\n      call_date: out.call_date,\n      agent_name: out.agent_name || 'Unknown Agent',\n      customer_name: out.customer_name,\n      status: out.status,\n      router_reasons: out.router_reasons || [],\n      analysis: out.analysis,\n    },\n  },\n}];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Maps the Router envelope onto call_data_service POST /calls. Business persistence only -- never writes to S3 directly, and never touches the Bedrock Knowledge Base prefix."
+    },
+    {
+      "id": "d2e3f4a5-b6c7-48d9-0e1f-2a3b4c5d6e7f",
+      "name": "HTTP Request - Call Data Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5968,
+        -1004
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://REPLACE_WITH_CALL_DATA_SERVICE_URL:8006/calls",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.persistence_payload }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Business persistence. NON-BLOCKING BY CONSTRUCTION: onError=continueRegularOutput means a storage failure (or an undeployed service) continues to the success response instead of failing it, and the 5s timeout bounds any delay. No retries -- the write is idempotent by call_id, so n8n-level retry would add latency without adding safety. The user always gets their analysis; persistence.persisted simply reports false."
     }
   ],
   "connections": {
@@ -1614,7 +1728,12 @@
       "main": [
         [
           {
-            "node": "Build Success Response - Full Analysis",
+            "node": "Build Persistence Payload",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Observability Events",
             "type": "main",
             "index": 0
           }
@@ -1637,6 +1756,39 @@
         [
           {
             "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Observability Events": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Observability Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Persistence Payload": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Call Data Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Call Data Service": {
+      "main": [
+        [
+          {
+            "node": "Build Success Response - Full Analysis",
             "type": "main",
             "index": 0
           }
