@@ -1,4 +1,6 @@
 """Historical seed converter: determinism, field fidelity, window coverage."""
+import shutil
+import subprocess
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -15,9 +17,13 @@ from seed_historical_calls import (  # noqa: E402
     build_record,
     canonical_outcome,
     canonical_sentiment,
+    default_csv_path,
     main,
     read_rows,
 )
+
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "seed_historical_calls.py"
+APP_DIR = Path(__file__).resolve().parents[1] / "app"
 
 ANCHOR = date(2026, 7, 28)
 CSV_PATH = Path(__file__).resolve().parents[3] / "data" / "historical_sales_calls.csv"
@@ -297,6 +303,101 @@ def test_real_corpus_keeps_outcomes_and_never_invents_confidence():
     assert {r.analysis.call_outcome for r in records} <= {"Sale", "No Sale", "Follow-up Needed"}
 
 
+# ---- CLI path handling (container-shallow-path regression) ----------------
+#
+# services/call_data_service/scripts/seed_historical_calls.py used to compute
+# `Path(__file__).resolve().parents[3]` as an eagerly-evaluated argparse
+# default -- before `parse_args()` ever ran. Inside the Docker image, this
+# file executes from /service/scripts/seed_historical_calls.py, which has no
+# 4th parent, so even `--help` raised IndexError. The fixes:
+#   1. the default is now `None` at the argparse level (no path is computed
+#      merely to build the parser or print --help);
+#   2. `default_csv_path()` resolves the local-repo path only when needed,
+#      guarded by `len(parents) > 3`, and falls back to a plain literal
+#      instead of indexing a parent that may not exist.
+#
+# The tests below actually reproduce the shallow /service/... layout on disk
+# (copying the real `app/` package alongside a copy of the script, exactly
+# like the Dockerfile's `COPY app ./app` + `COPY scripts ./scripts` into
+# `/service`) and invoke it as a real subprocess -- the only way to prove
+# `Path(__file__).resolve().parents` genuinely has few entries, rather than
+# asserting against this test file's own (deep) location.
+
+
+@pytest.fixture
+def shallow_service_layout(tmp_path) -> Path:
+    """Builds tmp_path/service/{app,scripts}/, mirroring the Docker image's
+    directory depth exactly, and returns the copied script's path."""
+    service_root = tmp_path / "service"
+    shutil.copytree(APP_DIR, service_root / "app")
+    scripts_dir = service_root / "scripts"
+    scripts_dir.mkdir(parents=True)
+    shutil.copy2(SCRIPT_PATH, scripts_dir / "seed_historical_calls.py")
+    return scripts_dir / "seed_historical_calls.py"
+
+
+def test_default_csv_path_resolves_to_the_real_repo_csv_locally():
+    """Existing local-repo default behavior is preserved: no --csv-path,
+    running from the real (deep) checkout location, resolves the same
+    data/historical_sales_calls.csv every other local tool uses."""
+    assert default_csv_path() == CSV_PATH
+
+
+def test_help_works_from_a_shallow_docker_style_layout(shallow_service_layout):
+    """The exact bug: --help must not crash with IndexError when this file
+    runs from a shallow /service/scripts/ path, matching the Docker image."""
+    result = subprocess.run(
+        [sys.executable, str(shallow_service_layout), "--help"],
+        cwd=str(shallow_service_layout.parent),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "IndexError" not in result.stderr
+    assert "--csv-path" in result.stdout
+
+
+def test_explicit_csv_path_works_from_a_shallow_docker_style_layout(shallow_service_layout, tmp_path):
+    """An explicit --csv-path must be used verbatim from the shallow layout
+    too -- this is the real Docker usage pattern (no local repo checkout,
+    only an operator-supplied CSV path)."""
+    csv_file = tmp_path / "supplied.csv"
+    csv_file.write_text(
+        "call_id,agent_name,sale_result,customer_intent,main_objection,customer_sentiment,"
+        "agent_performance_score,lead_quality_score,follow_up_needed,next_meeting_scheduled,"
+        "call_category,manager_notes,transcript\n"
+        'CALL_900,Sarah Levi,Sale,high,none,positive,5,5,false,true,new_business,,'
+        '"Agent: hi.\nCustomer: hi."\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(shallow_service_layout), "--csv-path", str(csv_file), "--anchor-date", "2026-07-28", "--dry-run"],
+        cwd=str(shallow_service_layout.parent),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "CALL_900" in result.stdout
+    assert "Read 1 rows" in result.stdout
+
+
+def test_missing_csv_path_from_a_shallow_layout_reports_a_clean_error_not_a_crash(shallow_service_layout):
+    """No --csv-path, shallow layout, no /data volume mounted -- must fail
+    with the documented clean error (exit 2), never an IndexError traceback."""
+    result = subprocess.run(
+        [sys.executable, str(shallow_service_layout), "--dry-run"],
+        cwd=str(shallow_service_layout.parent),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2
+    assert "IndexError" not in result.stderr
+    assert "ERROR: CSV not found" in result.stdout
+
+
 # ---- dry run ---------------------------------------------------------------
 
 
@@ -318,6 +419,31 @@ def test_dry_run_writes_nothing_and_needs_no_aws(capsys, monkeypatch):
 
 def test_missing_csv_returns_an_error_code(tmp_path):
     assert main(["--csv-path", str(tmp_path / "nope.csv"), "--dry-run"]) == 2
+
+
+def test_missing_csv_path_reports_the_exact_path_in_a_clear_message(tmp_path, capsys):
+    missing = tmp_path / "nope.csv"
+    exit_code = main(["--csv-path", str(missing), "--dry-run"])
+    assert exit_code == 2
+    assert f"ERROR: CSV not found at {missing}" in capsys.readouterr().out
+
+
+def test_explicit_csv_path_is_used_verbatim_over_any_default(tmp_path, capsys):
+    """--csv-path always wins, even when a real default would also resolve."""
+    csv_file = tmp_path / "custom_name.csv"
+    csv_file.write_text(
+        "call_id,agent_name,sale_result,customer_intent,main_objection,customer_sentiment,"
+        "agent_performance_score,lead_quality_score,follow_up_needed,next_meeting_scheduled,"
+        "call_category,manager_notes,transcript\n"
+        'CALL_901,Daniel Cohen,No Sale,low,price,neutral,3,2,false,false,renewal,,'
+        '"Agent: hi.\nCustomer: hi."\n',
+        encoding="utf-8",
+    )
+    exit_code = main(["--csv-path", str(csv_file), "--anchor-date", "2026-07-28", "--dry-run"])
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert str(csv_file) in output
+    assert "CALL_901" in output
 
 
 # ---- seeding through the repository abstraction ---------------------------

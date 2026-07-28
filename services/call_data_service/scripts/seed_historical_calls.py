@@ -285,10 +285,36 @@ def read_rows(csv_path: Path) -> list[dict[str, str]]:
         return [row for row in csv.DictReader(handle) if _clean(row.get("call_id"))]
 
 
+def default_csv_path() -> Path:
+    """Best-effort local-repo default: scripts/ -> call_data_service/ -> services/ -> repo root.
+
+    Guarded because only `app/` and `scripts/` are copied into the Docker
+    image (this file then runs from /service/scripts/, which has no 4th
+    parent to index) -- `--csv-path` must be passed explicitly in that
+    environment. Never raises IndexError; the caller checks `.exists()`.
+    """
+    parents = Path(__file__).resolve().parents
+    if len(parents) > 3:
+        return parents[3] / "data" / "historical_sales_calls.csv"
+    return Path("/data/historical_sales_calls.csv")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Seed the historical call corpus into S3.")
-    default_csv = Path(__file__).resolve().parents[3] / "data" / "historical_sales_calls.csv"
-    parser.add_argument("--csv-path", type=Path, default=default_csv)
+    # No default path is computed here -- argument parsing (including --help)
+    # must never depend on resolving a filesystem location first. `None`
+    # means "use default_csv_path(), resolved after parsing, once we know
+    # the flag wasn't supplied."
+    parser.add_argument(
+        "--csv-path",
+        type=Path,
+        default=None,
+        help=(
+            "Path to historical_sales_calls.csv. Defaults to the local repo layout "
+            "(services/call_data_service/../../data/historical_sales_calls.csv); "
+            "required when running from a shallow layout such as the Docker image."
+        ),
+    )
     parser.add_argument(
         "--anchor-date",
         type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
@@ -298,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Build and validate records, write nothing.")
     args = parser.parse_args(argv)
 
-    csv_path: Path = args.csv_path
+    csv_path: Path = args.csv_path if args.csv_path is not None else default_csv_path()
     if not csv_path.exists():
         print(f"ERROR: CSV not found at {csv_path}")
         return 2
