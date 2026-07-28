@@ -4,10 +4,11 @@
 # No shared network dependency beyond the default compose network.
 # rag_service is the real Amazon Bedrock Knowledge Base implementation
 # (Phase 12); call_signal_analyser, guardrails_service, and langgraph_agent
-# remain Phase 6 mock skeletons. ai_observability_service is a standalone
-# backend feature (AI Usage, Token, and Cost Monitoring) outside the
-# four-service analysis pipeline -- not called by n8n or the frontend yet;
-# see its own README.
+# remain Phase 6 mock skeletons. call_data_service is the S3-backed business
+# persistence + Overview aggregation layer (written by n8n's post-Router
+# branch, read by the React Overview/Calls/Call Details screens).
+# ai_observability_service is a standalone backend feature (AI Usage, Token,
+# and Cost Monitoring) outside the analysis pipeline -- see its own README.
 
 services:
   rag_service:
@@ -77,6 +78,37 @@ services:
       - "8004:8004"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8004/health', timeout=2).status==200 else 1)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  call_data_service:
+    build:
+      context: ./services/call_data_service
+    container_name: xsight-call-data-service
+    ports:
+      - "8006:8006"
+    environment:
+      - AWS_REGION=us-east-2
+      - XSIGHT_S3_BUCKET=xsight-sales-call-analytics-881490130721-us-east-2
+      # Business records live under the application prefix -- deliberately
+      # OUTSIDE the Bedrock data source's inclusionPrefixes, so a live
+      # analyzed call can never be ingested into the RAG corpus. The service
+      # refuses to start if these two overlap.
+      - XSIGHT_APPLICATION_PREFIX=xsight/application/analyzed-calls/v1/
+      - XSIGHT_BEDROCK_FORBIDDEN_PREFIX=xsight/bedrock/
+      - DEFAULT_LIST_LIMIT=100
+      - MAX_LIST_LIMIT=500
+      - LOG_LEVEL=INFO
+      # AWS credentials are never hardcoded here -- ${...} pulls from the host
+      # shell/environment (or a gitignored .env at the compose project root).
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8006/health', timeout=2).status==200 else 1)"]
       interval: 15s
       timeout: 3s
       retries: 3

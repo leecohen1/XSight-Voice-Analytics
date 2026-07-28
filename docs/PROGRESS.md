@@ -293,3 +293,49 @@ Each fix was applied directly to the live workflow via the n8n MCP tools and re-
 **Frontend live-mode status:** `frontend/.env` (gitignored; `frontend/.gitignore` had no env-file pattern at all and was corrected to add one) sets `VITE_USE_MOCK=false` and `VITE_N8N_WEBHOOK_URL` to the live production webhook. Confirmed at the served-bundle level (not just the `.env` file) that `import.meta.env` resolves correctly in the running dev server. A literal browser click-through of the Upload → Results flow was not performed by the assistant (no browser-automation tool available in this environment); verified instead by confirming `analyzeCall.js`'s multipart field names exactly match what the live webhook expects, and that the real webhook response matches the schema the already-built `ResultsView` component was verified against.
 
 **Remaining known limitations (unchanged, already disclosed in every pipeline response's own `limitations` field):** post-transcription content guardrails are enforced by an inline n8n deterministic Code node, not `guardrails_service` (which still only implements the `pre_transcription` stage); `POST /check/output` is not implemented, so the Final Analysis Chain's output is not independently guardrail-checked; NeMo Guardrails is not integrated anywhere; the Call Signal Analyser and LangGraph reasoning remain deterministic/rule-based (no trained PyTorch model, no LLM call inside LangGraph); all four backend services and the n8n webhook are reachable with no authentication (an explicit, accepted decision for this demo, not yet remediated). A full, evidence-based audit of these and other findings (dead code, dependency/security review, test coverage gaps) is recorded separately in `docs/FULL_PROJECT_AUDIT.md`.
+
+### Overview vertical slice — S3 business persistence + real Overview screen (cross-phase)
+
+Closed the gap the Overview audit identified: the pipeline analyzed calls and
+then discarded them, so every dashboard number came from frontend mock data
+(two KPIs were literal hardcoded constants). Built a real persistence and read
+path, on Amazon S3 only — no database introduced.
+
+**New service `services/call_data_service` (port 8006).** FastAPI + Pydantic +
+boto3, following the four existing services' conventions exactly (structured
+error envelope, `GET /health`, Dockerfile, `.env.example`, pytest). Endpoints:
+`POST /calls`, `GET /calls`, `GET /calls/{call_id}`,
+`GET /overview?period=7d|30d`, `GET /health`. **220 tests, all passing**, every
+one against an in-memory S3 fake implementing real `ListObjectsV2`
+continuation-token pagination — zero network calls, no AWS credentials needed.
+
+**S3 layout and the Bedrock guarantee.** Records live at
+`xsight/application/analyzed-calls/v1/year=YYYY/month=MM/day=DD/<call_id>.json`
+— a *sibling* of `xsight/bedrock/historical-calls/v1/`, never a child, so a
+live analyzed call can never be picked up by a Knowledge Base sync and cited
+back as curated evidence. Enforced three independent times: the service
+refuses to start if the prefixes overlap; `_assert_safe_key` re-validates
+every key before any Get/Put/List (and rejects `..` traversal); and tests
+assert both. The date partition means an Overview window lists only the 2-3
+month prefixes it touches instead of scanning the bucket.
+
+**Deterministic historical seed.** `scripts/seed_historical_calls.py` converts
+the 24-call corpus without calling Gemini, AssemblyAI, Bedrock, or the
+pipeline, and without modifying the CSV. The CSV has no date column, so dates
+are *assigned* from a fixed offset table indexed by each call's position
+within its agent's group — same rows + same anchor => byte-identical output,
+regardless of input row order. Offsets guarantee every agent has >=2 scored
+calls in both 30-day windows (making the improved-agent rule evaluable) and
+>=1 in both 7-day windows, spanning ~68 days. Improvement values come from the
+CSV's real scores; the script never arranges data to manufacture one. Fields
+the corpus never recorded stay null (`confidence`, `risk_level`) or empty
+(`similar_calls`, `suggested_follow_up_email`) rather than being invented;
+`coaching_feedback` carries `manager_notes` verbatim. Dry run: 24/24 built,
+0 failures, 11 attention calls (5 human_review, 3 customer_dissatisfaction,
+2 recoverable_opportunity, 1 critical_coaching).
+
+**Verified live via uvicorn + real boto3:** health 200; a storage failure
+returns 503 with **no AWS detail in the body** (the `InvalidAccessKeyId` /
+`AccessDenied` appears only in the server log); bad period and bad call_id
+both 422; missing env vars reported together; an application prefix inside the
+Bedrock prefix refused at startup.

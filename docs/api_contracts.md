@@ -370,3 +370,92 @@ uvicorn app.main:app --reload --port <8001|8002|8003|8004|8005>
 ```
 
 See `scripts/test_mock_services.sh` for an automated smoke test covering all four `/health` endpoints, one successful request per main endpoint, and one intentionally invalid request per service (15 checks total).
+
+---
+
+## 6. `call_data_service` (port 8006)
+
+S3-backed business persistence and Overview aggregation. Written by n8n's
+post-Router persistence branch; read by the React Overview / Calls / Call
+Details screens. Stores records under
+`xsight/application/analyzed-calls/v1/year=YYYY/month=MM/day=DD/<call_id>.json`
+— deliberately outside the Bedrock Knowledge Base ingestion prefix, so a live
+analyzed call can never be swept into the curated RAG corpus.
+
+Full contract, aggregation rules and the deterministic attention formula:
+[docs/overview/03_API_Mapping.md](overview/03_API_Mapping.md).
+
+### `GET /health`
+
+```bash
+curl -s http://localhost:8006/health
+# {"status":"ok","service":"call_data_service","version":"1.0.0"}
+```
+
+### `POST /calls`
+
+Idempotent by `call_id`. Re-derives `attention` and `recovery_opportunity`
+server-side from the documented formula, so a caller cannot influence routing
+severity.
+
+```bash
+curl -s -X POST http://localhost:8006/calls \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "call_id": "CALL_3f2b9c1a-4d5e-4f6a-8b7c-9d0e1f2a3b4c",
+    "source": "live_analysis",
+    "created_at": "2026-07-28T10:00:00Z",
+    "call_date": "2026-07-28",
+    "agent_name": "Sarah Levi",
+    "customer_name": "Northwind Solutions",
+    "router_reasons": [],
+    "analysis": {
+      "transcript": "Agent: ...\nCustomer: ...",
+      "call_summary": "...",
+      "call_outcome": "No Sale",
+      "customer_sentiment": "neutral",
+      "agent_performance_score": 4,
+      "lead_quality_score": 5,
+      "confidence": 0.82,
+      "risk_level": "Medium",
+      "guardrail_status": "pass"
+    }
+  }'
+# 201 {"call_id":"...","key":"xsight/application/...","created":true,"overwritten":false}
+```
+
+### `GET /calls`
+
+Query params: `limit`, `cursor`, `agent_name`, `status`, `source`,
+`from_date`, `to_date`. Returns summaries without transcripts.
+
+```bash
+curl -s "http://localhost:8006/calls?limit=20&status=human_review_required"
+```
+
+### `GET /calls/{call_id}`
+
+Full stored record including the transcript. `404 CALL_NOT_FOUND` if absent.
+
+### `GET /overview?period=7d|30d`
+
+The entire Overview screen, pre-aggregated: `period`, `generated_at`,
+`executive_summary`, `kpis`, `close_rate_trend`, `improved_agents`,
+`attention_calls`, `recent_calls`, `data_quality`. All business calculation
+happens here; the frontend renders the returned values without recomputing.
+
+```bash
+curl -s "http://localhost:8006/overview?period=30d"
+```
+
+### Errors
+
+Same structured envelope as the other services. Bodies never contain a bucket
+name, object key, AWS error code, or credential detail.
+
+| Status | Codes |
+|---|---|
+| 404 | `CALL_NOT_FOUND` |
+| 422 | `VALIDATION_ERROR`, `MALFORMED_RECORD` |
+| 500 | `INTERNAL_ERROR`, `STORAGE_KEY_REJECTED` |
+| 503 | `SERVICE_MISCONFIGURED`, `STORAGE_UNAVAILABLE` |
