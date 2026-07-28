@@ -1035,7 +1035,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ $json }}",
+        "responseBody": "={{ $('Build Success Response - Full Analysis').first().json }}",
         "options": {
           "responseCode": 200
         }
@@ -1100,7 +1100,8 @@
           "timeout": 5000
         }
       },
-      "notes": "New (Langfuse instrumentation pass). POST /observability/events per ai_observability_service (app/main.py). PLACEHOLDER URL -- ai_observability_service is not deployed anywhere reachable from n8n Cloud yet (no EC2 deployment in this pass, per explicit instruction). Replace with the real reachable URL once deployed. onError: continueErrorOutput means this failing (e.g. unreachable placeholder) never affects the pipeline's real response -- observability must never break call analysis."
+      "notes": "New (Langfuse instrumentation pass). POST /observability/events per ai_observability_service (app/main.py). PLACEHOLDER URL -- ai_observability_service is not deployed anywhere reachable from n8n Cloud yet (no EC2 deployment in this pass, per explicit instruction). Replace with the real reachable URL once deployed. onError: continueErrorOutput means this failing (e.g. unreachable placeholder) never affects the pipeline's real response -- observability must never break call analysis.",
+      "onError": "continueErrorOutput"
     },
     {
       "id": "c1d2e3f4-a5b6-47c8-9d0e-1f2a3b4c5d6e",
@@ -1112,7 +1113,7 @@
         -1004
       ],
       "parameters": {
-        "jsCode": "// Maps the Router's envelope onto call_data_service's POST /calls contract.\n// Pure field mapping -- no business logic; attention/recovery are already\n// deterministically derived by the Router, and the service recomputes them\n// on write anyway.\nconst out = $json.final_output || {};\nreturn [{\n  json: {\n    persistence_payload: {\n      schema_version: '1.0',\n      call_id: out.call_id,\n      source: 'live_analysis',\n      created_at: out.created_at,\n      call_date: out.call_date,\n      agent_name: out.agent_name || 'Unknown Agent',\n      customer_name: out.customer_name,\n      status: out.status,\n      router_reasons: out.router_reasons || [],\n      analysis: out.analysis,\n    },\n  },\n}];\n",
+        "jsCode": "// Maps the Router's envelope onto call_data_service's POST /calls contract.\n// Reads the Router node directly, NOT $json: the upstream\n// 'Build Success Response - Full Analysis' Set node runs in raw mode and has\n// already unwrapped the envelope down to the bare analysis object, so\n// $json.final_output does not exist at this point.\n// status / created_at / attention / recovery_opportunity are intentionally\n// omitted -- call_data_service derives them from the same inputs on write.\n\nfunction uuid4() {\n  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {\n    return crypto.randomUUID();\n  }\n  const hex = '0123456789abcdef';\n  let s = '';\n  for (let i = 0; i < 36; i++) {\n    if (i === 8 || i === 13 || i === 18 || i === 23) s += '-';\n    else if (i === 14) s += '4';\n    else if (i === 19) s += hex[(Math.floor(Math.random() * 16) & 0x3) | 0x8];\n    else s += hex[Math.floor(Math.random() * 16)];\n  }\n  return s;\n}\n\nconst router = $('Router - Confidence and Category').first().json;\nconst body = $('Webhook Trigger').first().json.body || {};\n\nreturn [{\n  json: {\n    persistence_payload: {\n      schema_version: '1.0',\n      call_id: 'CALL_' + uuid4(),\n      source: 'live_analysis',\n      call_date: body.call_date,\n      agent_name: body.agent_name || 'Unknown Agent',\n      customer_name: body.customer_name,\n      router_reasons: router.router_reasons || [],\n      analysis: router.final_output,\n    },\n  },\n}];",
         "language": "javaScript",
         "mode": "runOnceForAllItems"
       },
