@@ -88,6 +88,9 @@ export function toCallListItem(summary: BackendCallSummary): CallListItem {
     source: summary.source,
     attentionRequired: summary.attention_required,
     attentionPriority: summary.attention_priority,
+    attentionCategory: summary.attention_category,
+    agentPerformanceScore: summary.agent_performance_score ?? undefined,
+    leadQualityScore: summary.lead_quality_score ?? undefined,
   }
 }
 

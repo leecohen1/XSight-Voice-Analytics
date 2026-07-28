@@ -269,6 +269,10 @@ export interface CallListItem {
   source?: CallSource
   attentionRequired?: boolean
   attentionPriority?: AttentionPriority
+  attentionCategory?: AttentionCategory
+  /** Both scores are returned by `GET /calls`; Team Intelligence aggregates them. */
+  agentPerformanceScore?: number
+  leadQualityScore?: number
 }
 
 /** Full record backing Call Details — the list item plus everything else. */
