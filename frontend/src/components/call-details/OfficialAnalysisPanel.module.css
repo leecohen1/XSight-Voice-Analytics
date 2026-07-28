@@ -1,0 +1,212 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.eyebrowLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-instrument);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--color-text-muted);
+}
+
+.eyebrowLabel svg {
+  color: var(--color-status-success);
+}
+
+.eyebrowCaption {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* The verdict strip is deliberately flat/plain — Recommended Next Action
+   below is the only "lit" element on this page. */
+.heroCard {
+  background: var(--color-bg-surface);
+}
+
+.hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.heroLeft {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1;
+  min-width: 260px;
+}
+
+.badgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.scoreRow {
+  display: flex;
+  gap: var(--space-7);
+  flex-wrap: wrap;
+}
+
+.scoreBadge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scoreLabel {
+  font-family: var(--font-instrument);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--color-text-muted);
+}
+
+.scoreValue {
+  font-family: var(--font-instrument);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreMax {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+  color: var(--color-text-muted);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+}
+
+@media (max-width: 768px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fieldLabel {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.fieldValue {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  line-height: var(--line-relaxed);
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tag {
+  background: var(--color-evidence-bg);
+  color: var(--color-evidence);
+  border: 1px solid var(--color-evidence-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  font-family: var(--font-instrument);
+  font-size: var(--text-xs);
+}
+
+.emailBlock {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  color: var(--color-text-secondary);
+}
+
+/* THE one lit element on this page — per the approved direction, no
+   other component on Call Details uses the amber accent. Flat fill,
+   no glow/blur: the "on-air" light is a solid color, not a halo. */
+.actionCallout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.actionCalloutIcon {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.actionCalloutBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.actionCalloutLabel {
+  font-family: var(--font-instrument);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--color-accent);
+}
+
+.actionCalloutText {
+  font-size: var(--text-md);
+  color: var(--color-text-primary);
+  line-height: var(--line-relaxed);
+  font-weight: var(--weight-medium);
+}
+
+.limitations {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  line-height: var(--line-relaxed);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}

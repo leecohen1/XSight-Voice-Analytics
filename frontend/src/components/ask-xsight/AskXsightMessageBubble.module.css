@@ -1,0 +1,36 @@
+.row {
+  display: flex;
+}
+
+.rowUser {
+  justify-content: flex-end;
+}
+
+.bubble {
+  max-width: 88%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: var(--line-relaxed);
+}
+
+.bubbleUser {
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-evidence-border);
+  color: var(--color-text-primary);
+  border-bottom-right-radius: var(--space-1);
+}
+
+.bubbleAssistant {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-primary);
+  border-bottom-left-radius: var(--space-1);
+}
+
+.citations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}

@@ -1,0 +1,64 @@
+.card {
+  position: relative;
+  background: var(--color-bg-surface);
+  box-shadow: var(--surface-hairline);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  overflow: hidden;
+  transition: border-color var(--duration-base) var(--easing-standard);
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent-a, var(--color-accent));
+  opacity: 0.85;
+}
+
+.topRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.iconWrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-bg, var(--color-accent-bg));
+  color: var(--accent-a, var(--color-accent));
+  flex-shrink: 0;
+}
+
+.label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.value {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  line-height: var(--line-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+.helpText {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}

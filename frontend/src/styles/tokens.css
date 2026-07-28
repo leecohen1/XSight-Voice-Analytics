@@ -1,0 +1,163 @@
+/**
+ * XSight design tokens — "Signal Room" direction.
+ *
+ * XSight listens: this token system is built around a professional
+ * audio-monitoring/instrument-panel vocabulary, not generic "AI SaaS"
+ * navy-and-violet. One warm signal-amber accent stands in for a
+ * console's "on-air" light and is reserved for the single actionable
+ * moment on a page; a cool slate-teal is reserved separately for
+ * evidence/citation/evaluation material (never for brand decoration).
+ * Semantic status colors are a third, independent set — never doubled
+ * up with the brand accent.
+ *
+ * Single committed dark theme (matte charcoal, not navy-black) — see
+ * frontend/README.md. No glow/gradient decoration: depth comes from a
+ * single top-left hairline highlight, not colored shadow blur.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- Surfaces (matte charcoal, warm-neutral — not navy) ------------ */
+  --color-bg-app: #15151a;
+  --color-bg-surface: #1b1b21;
+  --color-bg-elevated: #212129;
+  --color-bg-subtle: #27272f;
+  --color-bg-overlay: rgba(10, 10, 13, 0.72);
+
+  /* ---- Text (warm-neutral, not blue-white) --------------------------- */
+  --color-text-primary: #ece9e3;
+  --color-text-secondary: #a3a0a8;
+  --color-text-muted: #6c6a73;
+  --color-text-on-accent: #1a1108;
+
+  /* ---- Borders --------------------------------------------------------- */
+  --color-border-subtle: rgba(236, 233, 227, 0.08);
+  --color-border-strong: rgba(236, 233, 227, 0.16);
+  --color-border-accent: rgba(242, 146, 75, 0.4);
+
+  /* ---- Signal accent — the ONE brand color, amber "on-air" light ------- */
+  /* Reserved for the single lit/actionable moment on a page (Recommended
+     Next Action, the active pipeline stage) — never decorative fill. */
+  --color-accent: #f2924b;
+  --color-accent-bg: rgba(242, 146, 75, 0.13);
+  --color-accent-border: rgba(242, 146, 75, 0.4);
+
+  /* ---- Evidence / citation / evaluation — cool slate-teal -------------- */
+  /* Reserved strictly for evidence, citations, and quality-evaluation
+     material. Never used as brand decoration. */
+  --color-evidence: #4fa6a0;
+  --color-evidence-bg: rgba(79, 166, 160, 0.13);
+  --color-evidence-border: rgba(79, 166, 160, 0.38);
+
+  /* ---- Status semantics (independent hue family) ------------------------ */
+  --color-status-success: #52b788;
+  --color-status-success-bg: rgba(82, 183, 136, 0.13);
+  --color-status-warning: #d9a441;
+  --color-status-warning-bg: rgba(217, 164, 65, 0.13);
+  --color-status-danger: #d9534f;
+  --color-status-danger-bg: rgba(217, 83, 79, 0.13);
+  --color-status-review: #b98cc7;
+  --color-status-review-bg: rgba(185, 140, 199, 0.13);
+  --color-status-processing: #6c93b8;
+  --color-status-processing-bg: rgba(108, 147, 184, 0.13);
+  --color-status-neutral: #8a8890;
+  --color-status-neutral-bg: rgba(138, 136, 144, 0.13);
+
+  /* ---- Quality evaluation (RAGAS) verdicts — semantic, not instrument -- */
+  --color-evaluation-passed: var(--color-status-success);
+  --color-evaluation-passed-bg: var(--color-status-success-bg);
+  --color-evaluation-review: var(--color-status-warning);
+  --color-evaluation-review-bg: var(--color-status-warning-bg);
+  --color-evaluation-failed: var(--color-status-danger);
+  --color-evaluation-failed-bg: var(--color-status-danger-bg);
+  --color-evaluation-not-evaluated: var(--color-status-neutral);
+  --color-evaluation-not-evaluated-bg: var(--color-status-neutral-bg);
+
+  /* ---- Citations — an evidence concept, so they use the evidence hue --- */
+  --color-citation: var(--color-evidence);
+  --color-citation-bg: var(--color-evidence-bg);
+  --color-citation-border: var(--color-evidence-border);
+
+  /* ---- Focus ------------------------------------------------------------ */
+  --focus-ring: 0 0 0 2px var(--color-bg-app), 0 0 0 4px var(--color-accent);
+
+  /* ---- Spacing scale (4px base) ------------------------------------------ */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+
+  /* ---- Radius — deliberately restrained, not "rounded-lg everywhere" --- */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* ---- Typography ---------------------------------------------------------
+     Two deliberate roles, not one family at different weights:
+     --font-narrative (humanist sans) carries call summaries, coaching
+     copy, prose — anything spoken or written by a person.
+     --font-instrument (monospace) carries meters, labels, call IDs,
+     ledger numerals, transcript text — anything measured or logged.
+     Both are system stacks (no webfont dependency), but used with
+     real intent instead of interchangeably. */
+  --font-narrative: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-instrument: ui-monospace, 'SFMono-Regular', Consolas, 'Roboto Mono', monospace;
+
+  /* Back-compat aliases used by shared components. */
+  --font-sans: var(--font-narrative);
+  --font-mono: var(--font-instrument);
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14.5px;
+  --text-md: 16px;
+  --text-lg: 19px;
+  --text-xl: 23px;
+  --text-2xl: 28px;
+  --text-3xl: 34px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --line-tight: 1.25;
+  --line-normal: 1.5;
+  --line-relaxed: 1.7;
+
+  --tracking-label: 0.06em;
+
+  /* ---- Shadow — neutral, single top-left light source, no glow --------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.34);
+  --shadow-md: 0 6px 16px -4px rgba(0, 0, 0, 0.48);
+  --shadow-lg: 0 16px 40px -12px rgba(0, 0, 0, 0.58);
+  --shadow-hover: 0 10px 24px -10px rgba(0, 0, 0, 0.55);
+
+  /* A single, very subtle top-edge highlight — the only "material" cue.
+     Not a diagonal sheen, not a colored glow. */
+  --surface-hairline: inset 0 1px 0 rgba(236, 233, 227, 0.04);
+
+  /* ---- Motion — precise, instrument-like. No spring/overshoot. --------- */
+  --duration-fast: 110ms;
+  --duration-base: 180ms;
+  --duration-slow: 280ms;
+  --duration-slower: 420ms;
+  --duration-idle: 5s;
+  --easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Fast, precise, no overshoot — a console fader move, not a bounce. */
+  --easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---- Layout ----------------------------------------------------------------- */
+  --sidebar-width: 244px;
+  --sidebar-width-collapsed: 72px;
+  --content-max-width: 1240px;
+  --topbar-height: 60px;
+}

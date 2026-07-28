@@ -1,0 +1,72 @@
+.card {
+  position: relative;
+  background: var(--color-bg-surface);
+  box-shadow: var(--surface-hairline);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: border-color var(--duration-base) var(--easing-standard);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-5) 0;
+}
+
+.headerCollapsible {
+  padding: var(--space-4) var(--space-5);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  transition: background-color var(--duration-base) var(--easing-standard);
+}
+
+.headerCollapsible:hover {
+  background: var(--color-bg-subtle);
+}
+
+.titleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.subtitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.chevron {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: transform var(--duration-base) var(--easing-emphasized);
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.body {
+  padding: var(--space-5);
+}
+
+.bodyWithHeader {
+  padding-top: var(--space-4);
+}
+
+.bodyCollapsible {
+  padding-top: 0;
+}

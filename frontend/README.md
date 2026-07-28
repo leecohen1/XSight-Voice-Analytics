@@ -1,34 +1,32 @@
 # frontend
 
-React web application for XSight — built as part of a one-day cross-phase demo push
-(frontend work normally starts at Phase 16 per `CLAUDE.md`; that gate was explicitly
-overridden for today only, per user instruction, to produce a working end-to-end demo).
-
-**Status:** minimal but functional. Covers Home, Sales Call Upload, and the Results
-Page only (Analytics Dashboard and the Ollama Assistant sidebar are out of scope for
-today — deferred to Phase 18 as originally planned).
+React web application for XSight — the persistent AI sales-call intelligence
+product described in `CLAUDE.md`. This is the **Frontend Foundation** build:
+application shell, design tokens, domain types, a mock-isolated API layer,
+and polished page shells for every confirmed product area, including Ask
+XSight. It supersedes the earlier one-day demo build (Home/Upload/Results,
+plain JS, no design system) described in this file's previous revision.
 
 ## Stack
 
-Vite + React (JS, no TypeScript) + `react-router-dom` for the three pages. No UI
-component library — plain CSS in `src/index.css`.
+Vite + React 19 + TypeScript, `react-router-dom` for routing. Styling is
+plain CSS: one global design-token file (`src/styles/tokens.css`) plus
+per-component **CSS Modules** — no styling framework, no icon library, no
+chart library, no state-management library. See "Why no framework/library
+X" below for the reasoning.
 
 ## Running it
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev        # Vite dev server, http://localhost:5173
+npm run build       # production build → dist/
+npm run lint        # oxlint
+npm run typecheck   # tsc --noEmit
 ```
 
-This starts the Vite dev server (prints the local URL, typically
-`http://localhost:5173`). `npm run build` produces a production build in `dist/`.
-
 ## Mock vs. real mode
-
-The app never forks its rendering code between mock and real data — both paths call
-the same `analyzeCall()` function (`src/api/analyzeCall.js`) and render the result
-through the same `<ResultsView />` component. Only the data source changes.
 
 Configuration lives in `frontend/.env` (see `.env.example`):
 
@@ -37,72 +35,126 @@ VITE_USE_MOCK=true
 VITE_N8N_WEBHOOK_URL=
 ```
 
-- **`VITE_USE_MOCK=true`** (default): submitting the Upload form skips the network
-  call entirely and returns the fixture at `src/mocks/exampleAnalysis.json` after a
-  short simulated delay. Use this to demo the Results Page — including the
-  `human_review_required` guardrail banner — without any backend running.
-- **`VITE_USE_MOCK=false`**: submitting the form POSTs a `multipart/form-data`
-  request (audio file + `agent_name`, `call_date`, optional `customer_name`/`notes`)
-  to the URL in **`VITE_N8N_WEBHOOK_URL`**, and renders whatever JSON comes back
-  through the same Results Page. This is the flag/URL the coordinator needs to set
-  once the n8n workflow (built in parallel by a sibling workstream) is live:
+Every page reads data exclusively through `src/services/*Api.ts` — never
+directly from `src/data/mock*.ts` and never via a raw `fetch` call. Each API
+module checks `isMockMode()` (`src/services/config.ts`) internally:
 
-  ```
-  VITE_USE_MOCK=false
-  VITE_N8N_WEBHOOK_URL=https://<your-n8n-instance>/webhook/<path>
-  ```
+- **`callsApi.uploadCall`** is the one function with a real implementation:
+  in real mode it POSTs a `multipart/form-data` request (audio file + form
+  fields) to `VITE_N8N_WEBHOOK_URL` and wraps the response into a
+  `CallRecord`. This is ported from the original demo build's working
+  `analyzeCall.js`.
+- **Every other function** (`listCalls`, `getCall`, `getOverview`,
+  `getTeamIntelligence`, `getUsageSummary`, `getQualitySummary`,
+  `askCallQuestion`, ...) throws a clear `"no backend contract exists
+  yet"` error in real mode rather than silently returning mock data or
+  nothing — there is no persistence/analytics/cost/RAGAS/Ask-XSight
+  backend yet, and pretending otherwise would be misleading. Set
+  `VITE_USE_MOCK=true` (the default) to use them.
 
-  Restart `npm run dev` after changing `.env` (Vite only reads env vars at startup).
+This means the UI never has an `if (mock) {...} else {...}` branch — the
+branching lives once, inside each API module.
 
-The Upload page also shows a small "Mode: Mock / Live" indicator so it's obvious
-which mode is active during a demo.
+## Persistent call history (mock mode)
 
-## Pages
+`src/data/mockCallStore.ts` is an in-memory, module-singleton "database"
+seeded from `src/data/mockCalls.ts` (11 realistic calls covering every
+required state: clean sale, no sale, follow-up needed, unresolved price
+objection + human review, an evidence conflict, a flagged output, failed
+transcription, in-progress processing, a high-cost long call, a
+high-quality RAGAS evaluation, and a weak-faithfulness RAGAS evaluation).
+Submitting Analyze Call writes a new record into this store and — in mock
+mode — `callsApi.runMockProcessing` advances it through
+`uploaded → validating → transcribing → analyzing → completed` with
+realistic delays, so Calls and Call Details reflect it immediately. This
+resets on a full page reload (no `localStorage`/backend) — intentional for
+this phase, documented rather than hidden.
 
-- **Home** (`/`) — one-screen project overview.
-- **Upload** (`/upload`) — the submission form: audio file, agent name, call date,
-  optional customer/company name, optional notes. Shows a spinner while the request
-  is in flight and an inline error message if the webhook call fails (network error,
-  non-2xx response, or missing `VITE_N8N_WEBHOOK_URL` in real mode).
-- **Results** (`/results`) — renders every field from `CLAUDE.md`'s final output JSON
-  schema: `transcript`, `call_summary`, `customer_intent`, `main_objection`,
-  `customer_sentiment`, `call_outcome`, `agent_performance_score`,
-  `lead_quality_score`, `similar_calls[]` (each rendered with a visible `call_id`
-  citation badge), `coaching_feedback[]`, `recommended_next_action`,
-  `suggested_follow_up_email`, `routing_category`, `confidence`, `risk_level`,
-  `detected_signals[]`, `limitations`, and `guardrail_status`. A banner is shown at
-  the **top** of the page whenever `guardrail_status` is `flagged` or
-  `human_review_required` — in the latter cases the `limitations` text is shown
-  inline in the banner itself, not buried at the bottom of the page.
+## Ask XSight
 
-  Reaching `/results` directly (without submitting the form first) shows a fallback
-  message instead of a blank/broken page, since the result is passed via router
-  state rather than persisted anywhere.
+Implemented per `CLAUDE.md` §9: a floating "Ask XSight" action inside Call
+Details (never in primary navigation, never auto-opened) opening a
+contained side panel (bottom sheet on mobile). `src/features/ask-xsight/useAskXsight.ts`
+drives the full state machine (closed/open/loading/answered/not enough
+evidence/error). `src/services/askXsightApi.ts` is mock-only: it builds
+every answer from the selected call's *actual* stored fields (never
+free-floating text), refuses to simulate a write-back to the official
+analysis ("change the outcome to Sale" → an explicit `unsupported_request`
+error), and falls back to "Not enough evidence" for anything it can't
+ground. This mirrors the real grounding rule the future backend will need
+to enforce, not just its visual shape.
 
-## Limitations (honest, as of today's demo build)
+## Design tokens & "AI Command Center" direction
 
-- **No Analytics Dashboard.** Out of scope for today per the task brief; deferred to
-  Phase 18.
-- **No Ollama Assistant sidebar.** Same — deferred to Phase 18.
-- **Mock mode is a static fixture, not a real backend.** `src/mocks/exampleAnalysis.json`
-  is one hand-written example shaped to match the schema; it does not reflect actual
-  model output, actual RAG retrieval, or actual guardrail evaluation. It exists to let
-  the Results Page be demoed and reviewed before the n8n workflow is live.
-- **The real-webhook path is implemented but not verified against a live n8n
-  instance** — the n8n workflow was being built in parallel by a sibling workstream
-  at the time this was written. The `fetch`/`FormData` logic follows the documented
-  contract (multipart upload in, final-output JSON out) and fails visibly if the URL
-  is unset or the request errors, but the coordinator should do one live round-trip
-  once both sides are ready.
-- **No persistence.** The analysis result only lives in router state for the current
-  session; refreshing `/results` loses it. Fine for a live demo walkthrough, not
-  meant for production use.
-- **Minimal styling, no design system.** Plain hand-written CSS, no component
-  library, no responsive breakpoints beyond a single mobile check on the results
-  grid. Today's goal was a working demo, not visual polish (explicitly the lowest
-  priority for today, per the task brief).
-- **No client-side validation beyond required-field checks** (file selected, agent
-  name, call date). No file-size/duration/MIME checks — those are the Guardrails
-  Service's job (Stage A, pre-transcription), not the frontend's.
-- **No automated tests.** Verified manually via `npm run build` and a local dev
-  server smoke check.
+`src/styles/tokens.css` defines every color, spacing, radius, shadow,
+typography, and motion value as a semantic CSS custom property
+(`--color-status-review`, `--space-4`, `--radius-lg`, ...). Components
+never hardcode a raw color. The product commits to a **single dark theme**
+(no light/dark toggle) — see "Design-quality notes" below.
+
+## Folder structure
+
+```
+src/
+  types/       Domain types — call.ts, team.ts, aiOperations.ts, askXsight.ts, api.ts, overview.ts
+  data/        Centralized mock fixtures (mockCalls, mockTeam, mockAiOperations, mockAskXsight) + mockCallStore
+  services/    API abstraction — callsApi, analyticsApi, teamApi, aiOperationsApi, askXsightApi, config, httpClient
+  components/  layout/ ui/ icons/ charts/ calls/ call-details/ ask-xsight/
+  features/    ask-xsight/useAskXsight.ts
+  pages/       Overview, AnalyzeCall, Calls, CallDetails, TeamIntelligence, AiOperations, Settings
+  styles/      tokens.css, base.css
+```
+
+## Routes
+
+`/overview` (landing redirect target) · `/analyze` · `/calls` ·
+`/calls/:callId` · `/team` · `/ai-operations` · `/settings`. Ask XSight has
+no route — it only exists inside `/calls/:callId`.
+
+## Why no framework/library X
+
+- **No Tailwind / CSS-in-JS**: the existing app already used plain CSS
+  successfully; CSS Modules (native to Vite) give the same component-scoped
+  styling without a new dependency.
+- **No icon library**: the product's icon vocabulary is small and stable
+  (`src/components/icons/`, ~20 hand-rolled inline SVGs) — smaller and more
+  consistent than pulling in a general-purpose set.
+- **No chart library**: every chart in this phase is "one trend line"
+  (`src/components/charts/TrendSparkline.tsx`, ~50 lines of SVG). A
+  charting library would be scope creep for that.
+- **No Redux/Zustand**: page-local `useState`/`useEffect` plus the
+  module-singleton mock store cover this phase's state needs.
+
+## Design-quality notes
+
+- **Single dark theme, not a toggle.** The approved direction ("AI Command
+  Center with restrained 3D elements") specifies one committed look. A
+  toggle would double the visual-QA surface of every component for no
+  product requirement in this phase.
+- **Official analysis vs. Ask XSight**: Call Details always renders
+  "Official XSight Analysis · Validated pipeline output" as the dominant,
+  first-rendered section; Ask XSight is opened by explicit action, appears
+  in a secondary panel, and is visually distinct (chat bubbles vs. section
+  cards).
+- **Not enough evidence** and **human review** are treated as first-class,
+  designed states (not error styling) — see `HumanReviewBanner` and
+  `AskXsightNotEnoughEvidence`.
+- **AI Usage & Cost** types (`src/types/aiOperations.ts`) are deliberately
+  shaped to align with the parallel `services/usage_monitoring_service`
+  workstream's real response models, as a coordination reference for
+  whoever wires up the real adapter later — this frontend does not call
+  that service.
+
+## Known limitations (honest, as of this phase)
+
+- **No backend for anything except `uploadCall`.** Every other API method
+  is mock-only, with the missing contract documented in the corresponding
+  service file's comments.
+- **No persistence beyond the browser tab.** The mock call store resets on
+  reload.
+- **No automated tests.** No test framework exists yet; adding one is out
+  of this phase's scope.
+- **No authentication.**
+- **Team Intelligence and AI Operations have no per-agent/per-call live
+  linkage beyond mock fixtures** — numbers are illustrative, clearly
+  labeled as estimates where the product requires it (cost, RAGAS).

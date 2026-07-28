@@ -366,8 +366,32 @@ the corpus never recorded stay null (`confidence`, `risk_level`) or empty
 0 failures, 11 attention calls (5 human_review, 3 customer_dissatisfaction,
 2 recoverable_opportunity, 1 critical_coaching).
 
+**Frontend.** Overview, Calls, Call Details and Analyze Call are real-backend
+only — the mock branches and the in-memory `mockCallStore` were removed from
+those paths, so a real call survives a refresh because it is genuinely
+persisted. All aggregation is backend-side; the page renders returned values
+and never recomputes. Added a period selector (7d/30d) with loading, error,
+empty and success states plus retry. Added Vitest + React Testing Library +
+jsdom (the project had no frontend test runner): **52 tests passing**, with
+typecheck, lint and build clean. Fixed a real defect found by the suite:
+`CallDetails` fired `getCallCost`/`getCallEvaluation` without a catch,
+producing unhandled promise rejections in live mode.
+
 **Verified live via uvicorn + real boto3:** health 200; a storage failure
 returns 503 with **no AWS detail in the body** (the `InvalidAccessKeyId` /
 `AccessDenied` appears only in the server log); bad period and bad call_id
 both 422; missing env vars reported together; an application prefix inside the
 Bedrock prefix refused at startup.
+
+**Not done / remaining manual steps** (see `docs/overview/05_Completion_Report.md`):
+`docker compose build call_data_service` did not complete in this session (no
+output, no image; `docker compose config` validates and the Dockerfile mirrors
+the working services) — unconfirmed and worth running before deployment. Also
+outstanding: the IAM grant for the application prefix, seeding the real
+bucket, deploying to EC2, importing the workflow and replacing
+`REPLACE_WITH_CALL_DATA_SERVICE_URL`, reattaching the Gemini credential (a
+known n8n API limitation), and a manual browser click-through. No
+authentication was added, consistent with the project's documented demo
+posture.
+
+Full documentation: `docs/overview/01_Audit.md` through `05_Completion_Report.md`.

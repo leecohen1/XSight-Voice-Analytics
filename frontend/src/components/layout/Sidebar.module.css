@@ -1,0 +1,160 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  background: var(--color-bg-surface);
+  border-right: 1px solid var(--color-border-subtle);
+  height: 100svh;
+  position: sticky;
+  top: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-5) var(--space-4);
+}
+
+/* A flat instrument nameplate mark — no gradient, no glow, no animation. */
+.brandMark {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.brandName {
+  font-weight: var(--weight-bold);
+  font-size: var(--text-md);
+  letter-spacing: -0.01em;
+}
+
+.primaryAction {
+  margin: 0 var(--space-4) var(--space-4);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-3);
+  flex: 1;
+  overflow-y: auto;
+}
+
+.navLink {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition: background-color var(--duration-base) var(--easing-standard), color var(--duration-base) var(--easing-standard);
+}
+
+.navLink::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0);
+  width: 3px;
+  height: 18px;
+  border-radius: 1px;
+  background: var(--color-accent);
+  transition: transform var(--duration-base) var(--easing-emphasized);
+}
+
+.navLink svg {
+  transition: transform var(--duration-base) var(--easing-emphasized);
+}
+
+.navLink:hover svg {
+  transform: scale(1.08);
+}
+
+.navLink:hover {
+  background: var(--color-bg-subtle);
+  color: var(--color-text-primary);
+}
+
+.navLinkActive {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  font-weight: var(--weight-semibold);
+}
+
+.navLinkActive::before {
+  transform: translateY(-50%) scaleY(1);
+}
+
+.navLabel {
+  white-space: nowrap;
+}
+
+.secondary {
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.overlay {
+  display: none;
+}
+
+/* Tablet: icon rail. */
+@media (max-width: 1023px) and (min-width: 641px) {
+  .sidebar {
+    width: var(--sidebar-width-collapsed);
+  }
+
+  .brandName,
+  .navLabel,
+  .primaryActionLabel {
+    display: none;
+  }
+
+  .navLink {
+    justify-content: center;
+  }
+}
+
+/* Mobile: off-canvas drawer. */
+@media (max-width: 640px) {
+  .sidebar {
+    position: fixed;
+    z-index: 60;
+    left: 0;
+    top: 0;
+    transform: translateX(-100%);
+    transition: transform var(--duration-base) var(--easing-standard);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  .overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: var(--color-bg-overlay);
+    z-index: 55;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+}
+
+@media (min-width: 641px) {
+  .overlay {
+    display: none;
+  }
+}

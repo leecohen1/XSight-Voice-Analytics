@@ -1,0 +1,40 @@
+.wrap {
+  display: flex;
+  align-items: flex-end;
+  height: var(--waveform-height, 64px);
+}
+
+.bar {
+  flex-shrink: 0;
+  border-radius: 1px;
+  transform-origin: bottom center;
+  transition: background-color var(--duration-base) var(--easing-standard), opacity var(--duration-base) var(--easing-standard);
+}
+
+.barButton {
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+.barAnimated {
+  animation: waveformPulse var(--duration-idle) var(--easing-standard) infinite;
+  animation-delay: var(--bar-delay, 0s);
+}
+
+@keyframes waveformPulse {
+  0%,
+  100% {
+    transform: scaleY(0.55);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barAnimated {
+    animation: none;
+    transform: scaleY(0.85);
+  }
+}
