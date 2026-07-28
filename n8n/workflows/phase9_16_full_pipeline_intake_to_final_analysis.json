@@ -1035,7 +1035,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ $('Build Success Response - Full Analysis').first().json }}",
+        "responseBody": "={{ (() => { const p = $('Build Persistence Payload').first().json.persistence_payload; const analysis = $('Build Success Response - Full Analysis').first().json; const write = $('HTTP Request - Call Data Service').first().json; const persisted = !!(write && write.call_id); const g = analysis.guardrail_status; return { call_id: p.call_id, created_at: $now.toISO(), call_date: p.call_date || null, agent_name: p.agent_name, customer_name: p.customer_name || null, status: g === 'human_review_required' ? 'human_review_required' : g === 'flagged' ? 'flagged' : 'completed', router_reasons: p.router_reasons || [], analysis: analysis, persistence: { persisted: persisted, detail: persisted ? ('Stored as ' + write.key) : ('call_data_service did not confirm the write: ' + JSON.stringify(write && write.error ? write.error : write)) } }; })() }}",
         "options": {
           "responseCode": 200
         }
