@@ -31,6 +31,68 @@ Nodes 1–4 (webhook intake, pre-transcription guardrails, AssemblyAI upload/sub
 - **Gemini credential — resolved.** All three Gemini nodes (`Gemini Information Extractor`, `AI Agent Node - Classify and Enrich`, `Gemini Final Analysis Chain`) now have a real credential (`Google Gemini(PaLM) Api account`) attached, bound manually in the n8n editor UI (attaching it programmatically via the n8n MCP tools was attempted and failed silently, three times, isolated — a confirmed tool limitation, not a workflow issue). The model in use is `models/gemini-3.5-flash`, confirmed working against a real key (the model shown in `modelId` was updated from `gemini-2.5-flash` during the manual credential setup and is what actually ran in the verified live execution). **Known gap:** the credential *reference* cannot be read back through the n8n API for this node type at all — it will not appear in `workflows/phase9_16_full_pipeline_intake_to_final_analysis.json` even though it is genuinely attached and working live. Re-importing that file into a fresh n8n instance requires manually reattaching the credential to all three nodes, exactly as this session had to do — see `SETUP.md` section 1.
 - **RAG/Call-Signal-Analyser/LangGraph reachability — resolved.** All three are deployed and confirmed reachable from n8n: RAG at `http://3.20.223.245:8001`, Call Signal Analyser and LangGraph Agent at `http://18.117.114.95:8002` and `:8004` respectively (deployed live during this session; ports opened on the host's security group via the AWS API). `guardrails_service` remains at `http://3.151.162.120:8003`. All four URLs are hardcoded directly into their respective HTTP Request nodes' `url` parameter (no `$env.*` expression remains) — see `SETUP.md` section 2 for the full mapping.
 
+## Persistence + response contract (fixed and verified live)
+
+Three defects were found and fixed against the live workflow while validating
+the `call_data_service` persistence integration. All three are reflected in
+`workflows/phase9_16_full_pipeline_intake_to_final_analysis.json`.
+
+1. **`Build Persistence Payload` read the wrong source.** It read
+   `$json.final_output`, but its upstream node `Build Success Response - Full
+   Analysis` is a Set node in `raw` mode that had *already* unwrapped that
+   envelope. Every field resolved to `undefined`, `JSON.stringify` dropped
+   them, and `POST /calls` received a 4-key body → **422** on the required
+   `call_id` and `analysis`. It now reads the Router node directly, mints a
+   contract-valid `CALL_<uuid4>` (`models.py` `LIVE_CALL_ID_RE` — `$execution.id`
+   would also have been rejected), and maps `analysis` from the real final
+   output. `status`, `created_at`, `attention` and `recovery_opportunity` are
+   deliberately **not** sent: `call_data_service` derives them on write so the
+   stored record cannot drift from the documented formula.
+
+2. **`Respond - Full Analysis` returned the wrong object.** It answered
+   `{{ $json }}`, which after the persistence node meant the webhook returned
+   `CreateCallResponse` (`{call_id, key, created, overwritten}`) — or, on
+   failure, a raw Axios error. `frontend/src/services/callsApi.ts` consumes a
+   `PipelineResponse` envelope and needs `call_id` to route to
+   `/calls/<id>`, so **Analyze Call could not complete a real upload.** The
+   node now assembles the full envelope (`call_id`, `created_at`, `call_date`,
+   `agent_name`, `customer_name`, `status`, `router_reasons`, `analysis`,
+   `persistence`), reading the minted id from `Build Persistence Payload`, the
+   analysis from `Build Success Response`, and the write result from the
+   `call_data_service` call.
+
+3. **Optional observability failed the whole run.** `HTTP Request -
+   Observability Events` points at the placeholder
+   `REPLACE_WITH_AI_OBSERVABILITY_SERVICE_URL` and fails `ENOTFOUND`. Its own
+   note claimed `onError: continueErrorOutput`, but no `onError` was actually
+   set, so the default `stopWorkflow` marked fully successful business runs as
+   failed. `onError` is now genuinely set. The node runs *after* the
+   persistence branch, so it never affected stored data — only execution
+   status. It stays pointed at the placeholder until
+   `ai_observability_service` is deployed somewhere n8n Cloud can reach.
+
+**Export sync note.** This export is patched surgically, not re-dumped from
+the n8n API. The API's workflow view is lossy for the Gemini LangChain nodes —
+it drops `"role": "user"` from `messages.values` and rewrites
+`builtInTools: null` to `{}` — so a wholesale re-export would commit a file
+that no longer re-imports correctly. Sync individual changed fields instead.
+
+## Verified live end-to-end runs
+
+| Execution | Status | Result |
+|---|---|---|
+| `36` | error (observability only) | First green business pipeline; `CALL_a99e53c5-…` persisted, 201 |
+| `38` | **success** | First run after the observability fix — confirms the fix |
+| `39` | **success** | `CALL_293b515c-…` persisted |
+| `40` | **success** | Envelope contract verified: all 9 `PipelineResponse` fields, `persisted: true` |
+
+Every run used the same 61-second WAV, so the AI stages are exercised
+identically. **Observed nondeterminism:** the same audio produced
+`confidence 0.64 → human_review_required` on one run and `0.72 → pass` on the
+next. The Router behaved correctly in both cases — this is expected AI
+nondeterminism, not a defect. Demos that need to show the human-review path
+should not rely on a specific confidence value being reproduced.
+
 ## Verified test runs (simulated, via n8n MCP `test_workflow`)
 
 Both runs used realistic pinned data for the AssemblyAI/Gemini/RAG/Call-Signal-Analyser/LangGraph nodes (a 14-turn price-objection sales call transcript) and ran the real logic for every Code/Set/IF node in between — i.e. every line of new orchestration logic executed for real, only the four external services' responses were simulated.
