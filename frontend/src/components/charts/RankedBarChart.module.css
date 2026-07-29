@@ -1,0 +1,125 @@
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* One shared grid across every row so labels, bars, values and sample
+   counts line up on common axes -- the thing that makes a ranked list
+   scannable rather than ragged. */
+.row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.1fr) minmax(80px, 2fr) auto minmax(96px, auto);
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: inherit;
+}
+
+.rowLink:hover,
+.rowLink:focus-visible {
+  background: var(--color-bg-subtle);
+}
+
+.rowLink:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.label {
+  color: var(--color-text-primary);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track {
+  position: relative;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-subtle);
+  overflow: hidden;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--color-evidence);
+}
+
+/* A low-sample bar is deliberately hollow-looking: present, readable, but
+   visually quieter than a bar the manager can actually rely on. */
+.fillLowSample {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-status-neutral) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+.value {
+  font-family: var(--font-instrument);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.valueMissing {
+  color: var(--color-text-muted);
+}
+
+.max {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-regular);
+  margin-left: 2px;
+}
+
+.sample {
+  font-family: var(--font-instrument);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.lowSampleTag {
+  color: var(--color-status-warning);
+  border: 1px solid var(--color-status-warning);
+  border-radius: var(--radius-pill);
+  padding: 1px 6px;
+  font-size: 10px;
+}
+
+.meta {
+  grid-column: 1 / -1;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 720px) {
+  .row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      'label value'
+      'track track'
+      'sample sample';
+    gap: var(--space-2);
+  }
+
+  .label { grid-area: label; }
+  .value { grid-area: value; }
+  .track { grid-area: track; }
+  .sample { grid-area: sample; }
+}

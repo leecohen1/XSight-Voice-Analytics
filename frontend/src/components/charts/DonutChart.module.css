@@ -1,0 +1,93 @@
+.wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.centerValue {
+  fill: var(--color-text-primary);
+  font-family: var(--font-narrative);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+}
+
+.centerLabel {
+  fill: var(--color-text-muted);
+  font-family: var(--font-instrument);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.emptyNote {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 260px;
+  flex: 1;
+}
+
+/* Fixed column widths keep counts and percentages on a shared axis so the
+   legend reads like a small table rather than ragged text. */
+.legendRow {
+  display: grid;
+  grid-template-columns: 10px 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.legendRow:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.legendSwatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.legendLabel {
+  color: var(--color-text-primary);
+  font-size: var(--text-base);
+}
+
+.legendCount {
+  color: var(--color-text-primary);
+  font-family: var(--font-instrument);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  text-align: right;
+  min-width: 2.5ch;
+}
+
+.legendPct {
+  color: var(--color-text-secondary);
+  font-family: var(--font-instrument);
+  font-size: var(--text-sm);
+  text-align: right;
+  min-width: 5ch;
+}
+
+@media (max-width: 720px) {
+  .wrap {
+    gap: var(--space-5);
+    justify-content: center;
+  }
+
+  .legend {
+    min-width: 0;
+    width: 100%;
+  }
+}
