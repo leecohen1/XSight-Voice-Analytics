@@ -1,7 +1,7 @@
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: 1.5fr 1fr 0.9fr 0.9fr 0.8fr auto;
+  grid-template-columns: 1.7fr 0.95fr 0.95fr 0.7fr 0.7fr 0.75fr auto;
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
@@ -70,10 +70,17 @@
   min-width: 0;
 }
 
-.callId {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
+/* Numbers get tabular figures and a de-emphasised scale suffix so a
+   column of them lines up and reads at a glance. */
+.numeric {
+  font-family: var(--font-instrument);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.scaleSuffix {
   color: var(--color-text-muted);
+  font-size: var(--text-xs);
 }
 
 .chevron {
@@ -84,7 +91,7 @@
 
 .headerRow {
   display: grid;
-  grid-template-columns: 1.5fr 1fr 0.9fr 0.9fr 0.8fr auto;
+  grid-template-columns: 1.7fr 0.95fr 0.95fr 0.7fr 0.7fr 0.75fr auto;
   gap: var(--space-4);
   padding: 0 var(--space-5) var(--space-2);
   font-size: var(--text-xs);
@@ -99,6 +106,9 @@
     display: none;
   }
 
+  /* Below tablet width the row becomes a stacked card, not a squeezed
+     table -- primary identity + outcome on top, everything else wraps
+     into one metadata line beneath. */
   .row {
     grid-template-columns: 1fr auto;
     row-gap: var(--space-3);
@@ -112,7 +122,6 @@
     flex-wrap: wrap;
   }
 
-  .callId,
   .cellDate {
     display: none;
   }
