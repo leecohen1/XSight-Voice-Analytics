@@ -71,6 +71,23 @@ the `call_data_service` persistence integration. All three are reflected in
    status. It stays pointed at the placeholder until
    `ai_observability_service` is deployed somewhere n8n Cloud can reach.
 
+4. **The browser could not read any webhook response (CORS).** Found during
+   manual browser verification, not by curl — curl ignores CORS entirely, so
+   every earlier end-to-end run passed while the real frontend could not work
+   at all. The Webhook Trigger had no `allowedOrigins`, so n8n answered the
+   `OPTIONS` preflight with `Access-Control-Allow-Origin` but omitted it from
+   the actual `POST` response. The request reached n8n and the pipeline ran to
+   completion, but the browser blocked the response and Analyze Call showed
+   "Could not reach the analysis service" every time. `options.allowedOrigins`
+   is now `*`. Verified: a `POST` with `Origin: http://localhost:5199` returns
+   `Access-Control-Allow-Origin: http://localhost:5199`, and the frontend now
+   renders the real server reason (e.g. "Failed during: Pre Transcription")
+   instead of a generic network error.
+
+   Tighten `allowedOrigins` to the deployed frontend origin before this is
+   exposed publicly; `*` is appropriate here only because the webhook takes no
+   credentials and no cookies.
+
 **Export sync note.** This export is patched surgically, not re-dumped from
 the n8n API. The API's workflow view is lossy for the Gemini LangChain nodes —
 it drops `"role": "user"` from `messages.values` and rewrites

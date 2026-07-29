@@ -7,7 +7,8 @@
         "path": "xsight-phase9-iteration1-mock-input-validation",
         "responseMode": "responseNode",
         "options": {
-          "binaryPropertyName": "audio_file"
+          "binaryPropertyName": "audio_file",
+          "allowedOrigins": "*"
         }
       },
       "id": "439da7b7-8622-4596-aa1f-8b562d0367b3",
