@@ -102,6 +102,17 @@ that no longer re-imports correctly. Sync individual changed fields instead.
 | `38` | **success** | First run after the observability fix — confirms the fix |
 | `39` | **success** | `CALL_293b515c-…` persisted |
 | `40` | **success** | Envelope contract verified: all 9 `PipelineResponse` fields, `persisted: true` |
+| `52` | **success** | **Full browser success path** — see below |
+
+Execution `52` is the one that matters for Analyze Call: it was driven from the
+real React app in a real browser (headless Chrome over CDP), not curl. The
+upload of `xsight_test_call.wav` produced
+`CALL_1219c153-3efb-4271-a07b-4fcd7e53aa93`, `POST /calls` returned 201
+(`created: true`), the S3 object was written, and — the part curl can never
+prove — **the browser successfully read the response**, extracted the
+`call_id`, rendered the success UI, and opened the new Call Details page.
+`GET /calls` went 29 → 31 records and Overview 7d moved 9 → 11 calls
+(44.4% → 36.4% close rate, 0 → 2 needing attention).
 
 Every run used the same 61-second WAV, so the AI stages are exercised
 identically. **Observed nondeterminism:** the same audio produced
@@ -109,6 +120,33 @@ identically. **Observed nondeterminism:** the same audio produced
 next. The Router behaved correctly in both cases — this is expected AI
 nondeterminism, not a defect. Demos that need to show the human-review path
 should not rely on a specific confidence value being reproduced.
+
+### Gemini model and key notes
+
+The live workflow and this export now agree on `models/gemini-3.5-flash`; the
+earlier drift (live on `2.5-flash`, export on `3.5-flash`) is resolved.
+
+Two things learned while restoring service after a quota exhaustion, worth
+knowing before swapping the Gemini credential again:
+
+- **`models/gemini-2.5-flash` is not available to new API keys.** Google
+  returns `NOT_FOUND: no longer available to new users` for *generation* even
+  though the model still appears in the key's `models.list` output. A newly
+  issued key therefore cannot run the pipeline until the model is changed.
+- **Free-tier keys return `503` on `gemini-3.5-flash` under load**, which
+  stretched a normally ~20 s pipeline to ~79 s. That exceeded the corporate
+  proxy's connection timeout in front of the browser, so the request died
+  ~2 s before n8n replied — the run persisted server-side but the UI showed a
+  network error. On a credited key the same pipeline completed in ~63 s and
+  the browser read the response normally. If Analyze Call ever fails in the
+  browser while the n8n execution shows success, check pipeline duration
+  first; it is a latency/timeout symptom, not a frontend defect.
+
+The Gemini credential itself (`Google Gemini(PaLM) Api account`,
+`googlePalmApi`) is bound in the n8n UI and never appears in this export. The
+n8n API does not expose credential values, so rotating the key is a manual
+step in the n8n editor — updating that one credential in place propagates to
+all three Gemini nodes, which reference it by id.
 
 ## Verified test runs (simulated, via n8n MCP `test_workflow`)
 
