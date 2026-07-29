@@ -124,3 +124,65 @@ describe('AnalyzeCall', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+describe('AnalyzeCall honest processing state', () => {
+  it('shows one indeterminate processing message, not a stage tracker', async () => {
+    // A fetch that never resolves keeps the page in the processing state.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    renderAnalyze()
+    await fillAndSubmit()
+
+    expect(await screen.findByRole('status')).toBeInTheDocument()
+    expect(screen.getByText(/Uploading and validating/i)).toBeInTheDocument()
+    // The old tracker's fake stage labels must be gone: the frontend cannot
+    // know which internal stage is active, so it must not claim to.
+    expect(screen.queryByText(/Transcribing audio/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Uploaded$/)).not.toBeInTheDocument()
+  })
+
+  // Message-escalation-by-elapsed-time is covered directly and
+  // deterministically by processingMessages.test.ts, against the pure
+  // function rather than by advancing fake timers through a live React
+  // tree (fragile: a fake-timer test that throws before its cleanup runs
+  // leaves every later test in the file starved of real timers).
+
+  it('prevents duplicate submission while processing', async () => {
+    const fetchMock = vi.fn(() => new Promise(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+    renderAnalyze()
+    await fillAndSubmit()
+
+    const submit = screen.getByRole('button', { name: /analyzing/i })
+    expect(submit).toBeDisabled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables the file input during processing', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    renderAnalyze()
+    await fillAndSubmit()
+
+    expect(document.getElementById('audio-file')).toBeDisabled()
+  })
+
+  it('resets cleanly after a failure so another call can be analyzed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ status: 'error', stage: 'pre_transcription', message: 'Rejected.' }), {
+            status: 400,
+          })
+        )
+      )
+    )
+    renderAnalyze()
+    await fillAndSubmit()
+
+    await screen.findByText(/Processing failed/i)
+    await userEvent.setup({ delay: null }).click(screen.getByRole('button', { name: /try again/i }))
+
+    expect(screen.getByRole('button', { name: /submit for analysis/i })).toBeEnabled()
+    expect(screen.queryByText(/Processing failed/i)).not.toBeInTheDocument()
+  })
+})
