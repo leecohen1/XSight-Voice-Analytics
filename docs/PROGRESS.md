@@ -533,3 +533,144 @@ identically for every status, not an accidental drift. All Overview -> Calls
 Requiring Attention -> Call Details -> Similar Historical Call, and
 Team/Calls -> representative-filtered Calls, navigation links confirmed
 present and tested.
+
+### Phase 9 — Browser verification (complete)
+
+All verification below ran against a **production build** (`npm run build`
++ `npm run preview`), not the dev server. Dev mode was tried first and
+Team Intelligence appeared to hang at 1440px/1024px; root-caused (not
+worked around) to React 18 StrictMode's double effect-invocation in dev
+mode stacking two sequential ~9.5s synchronous S3 reads in
+`call_data_service` (`GET /calls` reads each call's object individually,
+no parallelization — a real, pre-existing backend performance
+characteristic, out of scope to fix here per the mission's
+architecture-freeze constraint). Confirmed by running the identical
+journey against the production preview server, where it loaded in 9.9s
+matching a single real S3 round trip. Documented as a known limitation,
+not a redesign regression.
+
+**Automated checks, 4 fixed-route screens x 3 breakpoints (1440x900,
+1024x768, 390x844) = 12 combinations, all clean** (0 horizontal overflow,
+0 console errors excluding React Router's benign future-flag notices, 0
+failed network requests): Overview, Analyze Call, Calls, Team
+Intelligence.
+
+**Call Details — not a fixed route, verified separately for all three
+reachable states x 3 breakpoints = 9 combinations, all clean:**
+- a real `live_analysis` call reaching `human_review_required`
+  (`CALL_1219c153-...`, the same call from the real Analyze Call run
+  below) — confirms the "Why review is required" bullets render from real
+  `router_reasons`, not placeholder text
+- a `historical_seed` call reaching `completed`/"Ready" with `sale_result:
+  Sale` — confirms the green outcome hero, "Guardrails: Pass" banner, and
+  that no Outcome badge is duplicated in the badge row
+- an unknown call id — confirms a clean "Call not found" state with a
+  working "Back to Calls" link, no crash, no unhandled rejection
+
+**Real Analyze Call browser run — already executed and documented**
+(see `n8n/README.md`, commit `5bbb09a`, "Execution 52"): a real upload of
+`xsight_test_call.wav` through the actual React app, driving the real
+production n8n webhook end to end (AssemblyAI -> Gemini -> `POST /calls`
+201 -> S3 write), the browser reading the response, extracting
+`call_id CALL_1219c153-3efb-4271-a07b-4fcd7e53aa93`, rendering the success
+UI, and opening the new Call Details page. `GET /calls` moved 29 -> 31 and
+the Overview 7-day window moved 9 -> 11 calls, confirming the full chain
+reaches Overview and Team Intelligence, not just Call Details.
+
+**A real deployment-safety bug found and fixed during this phase, not
+just a test failure:** the currently-deployed EC2 backend
+(`http://3.145.6.220`, the address `frontend/.env`/`.env.local` point at)
+was queried directly and confirmed to **not** return `outcome_distribution`
+yet — that field only exists in this branch's backend code, not in what is
+actually running in production. `Overview.tsx` read
+`data.outcome_distribution.follow_up` and `data.outcome_distribution.sale`
+unguarded, so merging the redesigned frontend as-is would have thrown a
+`TypeError` and crashed the Overview screen the instant it went live
+against the currently-deployed backend — before that service is
+separately redeployed. Fixed defensively, not by changing the contract:
+`outcome_distribution` is now typed optional
+(`frontend/src/types/overview.ts`), `outcomeSlices()` returns `null` when
+absent, the Outcome Distribution card shows an honest "Not available —
+this backend deployment does not report an outcome breakdown yet." empty
+state instead of crashing, and the Follow-up Needed KPI falls back to
+`null` (renders as "—", the same convention as every other
+not-yet-available metric) rather than throwing. Covered by a new test:
+"degrades gracefully instead of crashing when an older backend omits
+outcome_distribution entirely." This is a live production dependency, not
+a cosmetic gap: **`services/call_data_service` must be redeployed to EC2
+before or together with this frontend for the Outcome Distribution chart
+to actually render data** — until then it will correctly show the empty
+state rather than break.
+
+**Local verification cleanup:** `frontend/.env` and `.env.local` were
+temporarily pointed at a local `call_data_service` instance during this
+phase and have been restored to their original values
+(`http://3.145.6.220`). The local backend instance, the production preview
+server, and the Chrome instance used for CDP-driven verification were all
+stopped (the preview server's process is a harness-supervised background
+task this sandbox could not force-kill at the OS level — access denied,
+protective of the harness's own process tree — but it holds no
+credentials, serves only static built assets, and its backend dependency
+is already stopped, so it is inert).
+
+**Test evidence (exact commands, re-run after the Overview fallback fix):**
+
+| Check | Command | Result |
+|---|---|---|
+| Frontend typecheck | `npm run typecheck` (`tsc --noEmit`) | Clean, no errors |
+| Frontend lint | `npm run lint` (`oxlint`) | Clean, exit 0 |
+| Frontend tests | `npm test -- --run` (`vitest run`) | 207 passed, 0 failed, 18 test files |
+| Frontend build | `npm run build` (`vite build`) | Succeeds, 316 KB JS / 64 KB CSS (gzip ~97 KB / ~11 KB) |
+| Backend tests | `python -m pytest -q` (`services/call_data_service`) | 234 passed, 0 failed |
+| n8n workflow exports | `JSON.parse(...)` on both exports under `n8n/workflows/` | Both parse as valid JSON |
+| Browser verification | CDP-driven script against `vite preview`, 3 breakpoints | 21/21 combinations clean (12 fixed-route + 9 Call Details) |
+| Real Analyze Call run | Manual browser upload against the live n8n webhook | Completed and documented (commit `5bbb09a`) |
+
+### Phase 10 — Documentation, merge decision, final report (complete)
+
+**Merge decision: merged to `main`.** All of the mission's stated
+merge-gate conditions passed with real evidence (not assumed): typecheck,
+lint, both test suites, and the production build are all clean; browser
+verification passed at all three breakpoints for every screen including
+Call Details' three reachable states; the one required real Analyze Call
+browser run was already completed and is independently documented; no
+screen uses mock data (`VITE_USE_MOCK=false` throughout); no backend
+architecture, n8n flow, API contract, persistence behavior, or routing
+rule was broken — the one contract change (`outcome_distribution`) is
+additive, and the one place that could have broken against an
+un-redeployed backend was found and fixed defensively during Phase 9
+rather than merged as a live risk.
+
+**Git state at merge:**
+- Stable pre-redesign baseline: tag `phase1-stable-pre-ux-redesign` ->
+  commit `779fd96` ("fix(n8n): harden production workflow timeouts"),
+  pushed to `origin`.
+- Redesign work: branch `feat/phase1-1-executive-ux-redesign`, pushed to
+  `origin` throughout via one commit per phase (`a3098b3` design system,
+  `c471c2a` Overview, `4203db7` Analyze Call, `7111bda` Calls, `417ea14`
+  Call Details, `60c0e96` Team Intelligence, `0a8baa2` cross-screen
+  consistency, plus this phase's Overview fallback fix and documentation).
+- Merged into `main`, pushed, and tagged `phase1.1-executive-ux-complete`.
+
+**Known limitations carried forward (none block the merge; each has a
+concrete next action):**
+1. **EC2 `call_data_service` still runs pre-redesign code** — no
+   `outcome_distribution` field. Not a blocker because the frontend now
+   degrades gracefully (see Phase 9); becomes fully visible once that
+   service is redeployed. *Next action: redeploy
+   `services/call_data_service` to `3.145.6.220`.*
+2. **`call_data_service`'s `GET /calls` reads each S3 object
+   synchronously, one at a time** (~9.5s for the demo dataset). A
+   pre-existing characteristic, not introduced by this redesign; only
+   became visible during dev-mode StrictMode double-fetch testing. *Next
+   action: batch/parallelize the S3 reads, or add pagination — out of
+   scope for a UX-only phase.*
+3. **AI Processing Cost, Quality Evaluation (RAGAS), and Ask XSight**
+   remain un-wired on Call Details (Phase 6) since their backing services
+   don't exist yet. *Next action: build `services/usage_monitoring_service`
+   (or equivalent) and reconnect the untouched, still-present components.*
+4. **Team Intelligence's period filter is computed client-side** over the
+   complete `listCalls()` result (`filterByPeriod` in `teamApi.ts`),
+   which is correct only because that endpoint has no server-side
+   pagination yet. *Next action: if pagination is added to `GET /calls`,
+   move period filtering server-side at the same time.*

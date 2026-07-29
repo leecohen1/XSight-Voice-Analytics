@@ -131,7 +131,9 @@ export interface OverviewSummary {
   generated_at: string
   executive_summary: string
   kpis: OverviewKpis
-  outcome_distribution: OutcomeDistribution
+  // Optional: a backend deployment that predates this field's addition
+  // (see Phase 1.1 redesign) simply omits it -- never a rendering bug.
+  outcome_distribution?: OutcomeDistribution
   close_rate_trend: TrendBucket[]
   improved_agents: ImprovedAgent[]
   attention_calls: AttentionCall[]

@@ -228,6 +228,18 @@ describe('Overview outcome distribution', () => {
     await screen.findByText(/Close rate rose/i)
     expect(screen.getByText('100.0%')).toBeInTheDocument()
   })
+
+  it('degrades gracefully instead of crashing when an older backend omits outcome_distribution entirely', async () => {
+    const { outcome_distribution: _omitted, ...overviewWithoutField } = makeOverview()
+    vi.stubGlobal('fetch', stubFetch([{ match: '/overview', body: overviewWithoutField }]))
+    renderOverview()
+
+    await screen.findByText(/Close rate rose/i)
+    expect(screen.getByText('Not available')).toBeInTheDocument()
+    expect(screen.getByText(/does not report an outcome breakdown yet/i)).toBeInTheDocument()
+    // The rest of the page -- KPIs, trend, attention list -- still renders normally.
+    expect(screen.getByText('Follow-up Needed')).toBeInTheDocument()
+  })
 })
 
 describe('Overview period selector', () => {

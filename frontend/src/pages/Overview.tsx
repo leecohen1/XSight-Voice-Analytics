@@ -81,9 +81,13 @@ function RecentRow({ call }: { call: RecentCall }) {
 }
 
 /** Outcome slices in a fixed, meaningful order -- decided outcomes first,
-    open/unknown last, so the legend reads like a funnel. */
+    open/unknown last, so the legend reads like a funnel.
+    Returns null when the backend response predates `outcome_distribution`
+    (an older deployment) -- the section renders an honest "not available"
+    state instead of crashing on an undefined field. */
 function outcomeSlices(data: OverviewSummary) {
   const d = data.outcome_distribution
+  if (!d) return null
   return [
     { key: 'sale', label: 'Sale', value: d.sale, color: 'var(--color-status-success)' },
     { key: 'no_sale', label: 'No Sale', value: d.no_sale, color: 'var(--color-status-danger)' },
@@ -175,14 +179,17 @@ export default function Overview() {
   // as every other primary metric. There is no previous-period comparison
   // for outcome_distribution yet, so previous/absolute/percentage are
   // honestly null rather than invented -- KpiCard already renders that as
-  // "Not enough comparison data".
+  // "Not enough comparison data". current_value falls back to null (rendered
+  // as "--") rather than crashing when an older backend deployment predates
+  // this field.
   const followUpMetric: KpiMetric = {
-    current_value: data.outcome_distribution.follow_up,
+    current_value: data.outcome_distribution?.follow_up ?? null,
     previous_value: null,
     absolute_change: null,
     percentage_change: null,
     trend_direction: 'unknown',
   }
+  const slices = outcomeSlices(data)
 
   return (
     <>
@@ -260,11 +267,19 @@ export default function Overview() {
 
           <div className={styles.sectionRow}>
             <SectionCard title="Outcome Distribution" subtitle="Every analyzed call in this period, by outcome">
-              <DonutChart
-                slices={outcomeSlices(data)}
-                centerValue={String(data.kpis.calls_analyzed.current_value ?? 0)}
-                centerLabel="calls"
-              />
+              {slices ? (
+                <DonutChart
+                  slices={slices}
+                  centerValue={String(data.kpis.calls_analyzed.current_value ?? 0)}
+                  centerLabel="calls"
+                />
+              ) : (
+                <EmptyState
+                  icon={<CallsIcon size={18} />}
+                  title="Not available"
+                  description="This backend deployment does not report an outcome breakdown yet."
+                />
+              )}
             </SectionCard>
 
             <SectionCard
