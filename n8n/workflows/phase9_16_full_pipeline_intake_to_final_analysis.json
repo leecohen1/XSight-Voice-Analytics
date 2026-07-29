@@ -221,7 +221,7 @@
         "contentType": "binaryData",
         "inputDataFieldName": "audio_file",
         "options": {
-          "timeout": 30000
+          "timeout": 60000
         }
       },
       "id": "a34f14ca-8a81-4d10-9b3a-32fb6af8c694",
@@ -247,7 +247,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { audio_url: $json.upload_url, speaker_labels: true } }}",
         "options": {
-          "timeout": 15000
+          "timeout": 20000
         }
       },
       "id": "b1d740d6-8782-465e-a23f-15b23f902286",
@@ -318,7 +318,7 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
-          "timeout": 15000
+          "timeout": 20000
         }
       },
       "id": "3f0deb31-a0fe-48d3-a92c-a4c6af1f81c3",
@@ -741,7 +741,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ $json.rag_payload }}",
         "options": {
-          "timeout": 15000
+          "timeout": 30000
         }
       },
       "id": "10c063a7-fd22-4434-95c0-5a48d3fb9166",
@@ -796,7 +796,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ $json.signal_payload }}",
         "options": {
-          "timeout": 15000
+          "timeout": 30000
         }
       },
       "id": "69e908a7-4aad-4cd5-8cb9-c4b2b125b416",
@@ -882,7 +882,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { question: $json.question, transcript: $json.transcript, metadata: $json.metadata, structured_extraction: $json.structured_extraction, rag_results: $json.rag_results, signal_analysis: $json.signal_analysis } }}",
         "options": {
-          "timeout": 20000
+          "timeout": 30000
         }
       },
       "id": "50985ccb-b8e1-489f-ab5e-cbeffb5b6a7b",
@@ -1136,7 +1136,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ $json.persistence_payload }}",
         "options": {
-          "timeout": 5000
+          "timeout": 15000
         }
       },
       "onError": "continueRegularOutput",
@@ -1802,7 +1802,8 @@
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
-    "availableInMCP": true
+    "availableInMCP": true,
+    "executionTimeout": 180
   },
   "pinData": {}
 }
