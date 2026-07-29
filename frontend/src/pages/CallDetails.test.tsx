@@ -27,7 +27,10 @@ describe('CallDetails', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     renderDetails('CALL_001')
-    expect(await screen.findByText('Sarah Levi')).toBeInTheDocument()
+    // The agent name legitimately appears twice: once as the breadcrumb's
+    // last segment (standard breadcrumb convention -- it names the current
+    // page), once as the H1. It is the raw call id that must not repeat.
+    expect((await screen.findAllByText('Sarah Levi')).length).toBeGreaterThan(0)
     expect(String(fetchMock.mock.calls[0][0])).toBe(`${SERVICE_URL}/calls/CALL_001`)
   })
 
@@ -39,13 +42,21 @@ describe('CallDetails', () => {
     )
     // No router state at all -- exactly what a browser refresh produces.
     renderDetails(id)
-    expect(await screen.findByText('Daniel Cohen')).toBeInTheDocument()
+    expect((await screen.findAllByText('Daniel Cohen')).length).toBeGreaterThan(0)
+  })
+
+  it('shows the raw call id exactly once, as secondary metadata', async () => {
+    const id = 'CALL_3f2b9c1a-4d5e-4f6a-8b7c-9d0e1f2a3b4c'
+    vi.stubGlobal('fetch', stubFetch([{ match: '/calls/', body: makeCallRecord({ call_id: id, source: 'live_analysis' }) }]))
+    renderDetails(id)
+    await screen.findAllByText('Sarah Levi')
+    expect(screen.getAllByText(id)).toHaveLength(1)
   })
 
   it('renders a seeded historical record whose optional fields are null', async () => {
     vi.stubGlobal('fetch', stubFetch([{ match: '/calls/', body: makeCallRecord() }]))
     renderDetails('CALL_001')
-    await screen.findByText('Sarah Levi')
+    await screen.findAllByText('Sarah Levi')
     // No "null", "NaN" or "undefined" leaks into the rendered output.
     expect(document.body.textContent).not.toMatch(/\bnull\b|\bNaN\b|\bundefined\b/)
   })
@@ -73,7 +84,7 @@ describe('CallDetails', () => {
         analysis: makeCallRecord().analysis,
       },
     })
-    expect(await screen.findByText(/Noa Friedman/)).toBeInTheDocument()
+    expect((await screen.findAllByText(/Noa Friedman/)).length).toBeGreaterThan(0)
   })
 
   it('surfaces a storage error when there is no fallback analysis', async () => {

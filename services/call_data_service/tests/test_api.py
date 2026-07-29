@@ -254,6 +254,7 @@ def test_overview_returns_the_full_contract(client):
         "generated_at",
         "executive_summary",
         "kpis",
+        "outcome_distribution",
         "close_rate_trend",
         "improved_agents",
         "attention_calls",
@@ -273,6 +274,17 @@ def test_overview_returns_the_full_contract(client):
         assert kpi in body["kpis"], f"missing KPI: {kpi}"
         for field in ("current_value", "previous_value", "absolute_change", "percentage_change", "trend_direction"):
             assert field in body["kpis"][kpi]
+
+    for bucket in ("sale", "no_sale", "follow_up", "uncertain", "unknown"):
+        assert bucket in body["outcome_distribution"], f"missing outcome_distribution bucket: {bucket}"
+
+
+def test_overview_outcome_distribution_reconciles_with_calls_analyzed(client):
+    _seed(client, 5)
+    body = client.get("/overview?period=30d").json()
+    dist = body["outcome_distribution"]
+    total = dist["sale"] + dist["no_sale"] + dist["follow_up"] + dist["uncertain"] + dist["unknown"]
+    assert total == body["kpis"]["calls_analyzed"]["current_value"]
 
 
 def test_overview_defaults_to_seven_days(client):

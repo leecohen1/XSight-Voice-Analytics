@@ -1,6 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { CallStatus } from '../types'
 import { uploadCall } from '../services/callsApi'
 import { HttpError } from '../services/httpClient'
 import PageHeader from '../components/ui/PageHeader'
@@ -8,23 +7,11 @@ import SectionCard from '../components/ui/SectionCard'
 import Button from '../components/ui/Button'
 import Waveform from '../components/visual/Waveform'
 import { generateAmbientBars } from '../components/visual/generateAmbientBars'
-import { CheckCircleIcon, UploadIcon, XCircleIcon } from '../components/icons'
+import { UploadIcon, XCircleIcon } from '../components/icons'
+import { elapsedMessage, formatElapsed } from '../analytics/processingMessages'
 import styles from './AnalyzeCall.module.css'
 
-const STAGE_LABELS: Record<CallStatus, string> = {
-  uploaded: 'Uploaded',
-  validating: 'Validating file & metadata',
-  transcribing: 'Transcribing audio',
-  analyzing: 'Analyzing call',
-  completed: 'Analysis complete',
-  human_review_required: 'Analysis complete — needs review',
-  flagged: 'Analysis complete — flagged',
-  failed: 'Processing failed',
-}
-
-const STAGE_ORDER: CallStatus[] = ['uploaded', 'validating', 'transcribing', 'analyzing']
-
-type PageState = 'idle' | 'submitting' | 'processing' | 'failed'
+type PageState = 'idle' | 'processing' | 'failed'
 
 interface FailureInfo {
   /** Short, user-facing explanation — never contains a raw request URL. */
@@ -66,12 +53,25 @@ export default function AnalyzeCall() {
   const [isDragging, setIsDragging] = useState(false)
   const [pageState, setPageState] = useState<PageState>('idle')
   const [validationError, setValidationError] = useState('')
-  const [currentStage, setCurrentStage] = useState<CallStatus | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [failure, setFailure] = useState<FailureInfo | null>(null)
   const [persistenceWarning, setPersistenceWarning] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const waveformBars = useMemo(() => generateAmbientBars(48), [])
+
+  // Elapsed-time ticker for the processing state. The request itself has no
+  // client-side timeout -- a valid AI analysis must never be aborted just
+  // for taking longer than a normal REST call.
+  useEffect(() => {
+    if (pageState !== 'processing') return
+    setElapsedSeconds(0)
+    const startedAt = Date.now()
+    const timer = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [pageState])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setAudioFile(e.target.files?.[0] ?? null)
@@ -86,7 +86,7 @@ export default function AnalyzeCall() {
 
   const resetForm = () => {
     setPageState('idle')
-    setCurrentStage(null)
+    setElapsedSeconds(0)
     setFailure(null)
     setPersistenceWarning(null)
   }
@@ -104,11 +104,9 @@ export default function AnalyzeCall() {
       return
     }
 
-    setPageState('submitting')
-    setCurrentStage('uploaded')
+    setPageState('processing')
     try {
       const response = await uploadCall({ audioFile, agentName, callDate, customerName, notes })
-      setPageState('processing')
 
       // The backend owns the id. n8n minted CALL_<uuid4> before the pipeline
       // ran and call_data_service stored the record under it, so this route
@@ -134,10 +132,8 @@ export default function AnalyzeCall() {
     }
   }
 
-  const isSubmitting = pageState === 'submitting' || pageState === 'processing'
-  const currentIndex = currentStage ? STAGE_ORDER.indexOf(currentStage) : -1
-  const progressPct = currentIndex >= 0 ? (currentIndex / (STAGE_ORDER.length - 1)) * 100 : 0
-  const isProcessing = pageState === 'submitting' || pageState === 'processing'
+  const isSubmitting = pageState === 'processing'
+  const isProcessing = pageState === 'processing'
 
   return (
     <>
@@ -268,30 +264,26 @@ export default function AnalyzeCall() {
           {isProcessing && (
             <>
               <div className={styles.processingVisual}>
-                <Waveform bars={waveformBars} tone="accent" animated height={56} barWidth={3} gap={3} ariaLabel="Listening" />
-                <span className={styles.processingCaption}>Listening…</span>
+                <Waveform bars={waveformBars} tone="accent" animated height={56} barWidth={3} gap={3} ariaLabel="Processing" />
+                <span className={styles.processingCaption}>Analyzing…</span>
               </div>
-              <div className={styles.stageTrack}>
-                <span className={styles.stageTrackLine} aria-hidden="true" />
-                <span className={styles.stageTrackFill} style={{ height: `${progressPct}%` }} aria-hidden="true" />
-                {STAGE_ORDER.map((stage) => {
-                  const stageIndex = STAGE_ORDER.indexOf(stage)
-                  const done = currentIndex > stageIndex
-                  const active = currentStage === stage
-                  return (
-                    <div key={stage} className={[styles.stage, active ? styles.stageActive : '', done ? styles.stageDone : ''].join(' ')}>
-                      <span className={styles.stageIcon}>{active ? <span className={styles.stagePulse} /> : done ? <CheckCircleIcon size={13} /> : null}</span>
-                      {STAGE_LABELS[stage]}
-                    </div>
-                  )
-                })}
+              {/* One honest indeterminate state. The webhook is a single
+                  blocking request, so no per-stage progress exists to show --
+                  claiming otherwise is what the old stage tracker got wrong. */}
+              <div className={styles.processingStatus} role="status" aria-live="polite">
+                <span className={styles.elapsedTime}>{formatElapsed(elapsedSeconds)}</span>
+                <p className={styles.processingMessage}>{elapsedMessage(elapsedSeconds)}</p>
+                <p className={styles.processingHint}>
+                  XSight is validating, transcribing, and analyzing this conversation against real AI services. This
+                  usually takes about one minute for the demo recording. Keep this page open.
+                </p>
               </div>
             </>
           )}
 
           {pageState === 'failed' && failure && (
             <div className={styles.resultBox}>
-              <div className={[styles.stage, styles.stageActive].join(' ')} style={{ color: 'var(--color-status-danger)' }}>
+              <div className={styles.failureHeading}>
                 <XCircleIcon size={20} />
                 Processing failed
               </div>

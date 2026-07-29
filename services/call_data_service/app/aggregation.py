@@ -21,6 +21,7 @@ from app.models import (
     DataQuality,
     ImprovedAgent,
     KpiMetric,
+    OutcomeDistribution,
     OverviewKpis,
     OverviewResponse,
     PeriodWindow,
@@ -88,6 +89,32 @@ def close_rate(records: list[AnalyzedCallRecord]) -> Optional[float]:
         return None
     sales = sum(1 for o in known if o == SALE_OUTCOME)
     return round(sales / len(known) * 100, 1)
+
+
+def outcome_distribution(records: list[AnalyzedCallRecord]) -> OutcomeDistribution:
+    """Count every call in the window by outcome.
+
+    Unlike `close_rate`, nothing is excluded here. A call with no recorded
+    outcome lands in `unknown` rather than being dropped, so the returned
+    counts always sum to `calls_analyzed` for the same window and the
+    frontend's chart can be reconciled against the headline KPI. Silently
+    omitting undecided calls would make the mix look more decisive than the
+    corpus actually is.
+    """
+    counts = OutcomeDistribution()
+    for record in records:
+        outcome = _normalized_outcome(record)
+        if outcome == SALE_OUTCOME:
+            counts.sale += 1
+        elif outcome == "no sale":
+            counts.no_sale += 1
+        elif outcome == "follow-up needed":
+            counts.follow_up += 1
+        elif outcome == "uncertain":
+            counts.uncertain += 1
+        else:
+            counts.unknown += 1
+    return counts
 
 
 def _average(values: list[float]) -> Optional[float]:
@@ -392,6 +419,7 @@ def build_overview(
             period_label, current, current_rate, attention_count, len(improved)
         ),
         kpis=kpis,
+        outcome_distribution=outcome_distribution(current),
         close_rate_trend=close_rate_trend(current, current_start, current_end),
         improved_agents=improved,
         attention_calls=attention_calls(current),

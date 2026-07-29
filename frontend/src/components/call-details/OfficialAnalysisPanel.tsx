@@ -1,4 +1,5 @@
 import type { CallAnalysisResult, GuardrailStatus, HumanReviewReason } from '../../types'
+import { outcomeTone } from '../../analytics/outcomeSemantics'
 import StatusBadge, { type StatusTone } from '../ui/StatusBadge'
 import ConfidenceIndicator from '../ui/ConfidenceIndicator'
 import SectionCard from '../ui/SectionCard'
@@ -14,16 +15,17 @@ function sentimentTone(sentiment: string): StatusTone {
   return 'neutral'
 }
 
-function outcomeTone(outcome: string): StatusTone {
-  if (outcome === 'Sale') return 'success'
-  if (outcome === 'No Sale') return 'danger'
-  return 'neutral'
-}
-
 function riskTone(risk: string): StatusTone {
   if (risk === 'Low') return 'success'
   if (risk === 'High') return 'danger'
   return 'warning'
+}
+
+/** routing_category -> "Pricing negotiation and followup" -- an internal
+    workflow label is never shown to a manager verbatim in snake_case. */
+function humanizeCategory(category: string): string {
+  const words = category.split('_')
+  return words.map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w)).join(' ')
 }
 
 export interface OfficialAnalysisPanelProps {
@@ -58,23 +60,27 @@ export default function OfficialAnalysisPanel({ analysis, guardrailStatus, human
       <SectionCard className={styles.heroCard}>
         <div className={styles.hero}>
           <div className={styles.heroLeft}>
-            {/* Seeded historical records legitimately lack risk level,
-                confidence and routing category — those are rendered as
-                "not recorded" rather than as a fabricated default. */}
+            {/* Call Outcome is the single most decision-relevant fact on
+                this page -- a Sales Manager's first question is "did we win
+                this deal, or is it still open" -- so it gets its own line
+                and the strongest treatment, not a badge sized the same as
+                Sentiment or Risk. Seeded historical records legitimately
+                lack risk level, confidence and routing category — those
+                render as "not recorded" rather than a fabricated default. */}
+            <div className={styles.outcomeHero}>
+              <span className={styles.outcomeLabel}>Business Outcome</span>
+              <span className={[styles.outcomeValue, styles[`outcome_${outcomeTone(analysis.call_outcome ?? '')}`]].join(' ')}>
+                {analysis.call_outcome ?? 'Not recorded'}
+              </span>
+            </div>
+
             <div className={styles.badgeRow}>
-              <StatusBadge
-                label={`Outcome: ${analysis.call_outcome ?? 'not recorded'}`}
-                tone={analysis.call_outcome ? outcomeTone(analysis.call_outcome) : 'neutral'}
-              />
               <StatusBadge
                 label={`Sentiment: ${analysis.customer_sentiment ?? 'not recorded'}`}
                 tone={analysis.customer_sentiment ? sentimentTone(analysis.customer_sentiment) : 'neutral'}
               />
               {analysis.risk_level && (
                 <StatusBadge label={`Risk: ${analysis.risk_level}`} tone={riskTone(analysis.risk_level)} />
-              )}
-              {analysis.routing_category && (
-                <StatusBadge label={`Routing: ${analysis.routing_category}`} tone="neutral" />
               )}
             </div>
             <div className={styles.scoreRow}>
@@ -91,6 +97,13 @@ export default function OfficialAnalysisPanel({ analysis, guardrailStatus, human
                 </span>
               </div>
             </div>
+            {/* Routing category is an internal workflow label, not a
+                business KPI -- it must not compete visually with Outcome.
+                Demoted to small, muted metadata with a manager-friendly
+                (humanized) label rather than the raw snake_case value. */}
+            {analysis.routing_category && (
+              <p className={styles.routingMeta}>Category: {humanizeCategory(analysis.routing_category)}</p>
+            )}
           </div>
           {analysis.confidence !== null && analysis.confidence !== undefined && (
             <ConfidenceIndicator confidence={analysis.confidence} />

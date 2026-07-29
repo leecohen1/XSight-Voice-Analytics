@@ -39,6 +39,9 @@ export function makeOverview(overrides: Partial<OverviewSummary> = {}): Overview
       calls_requiring_attention: kpi(3, 5),
       improved_agents_count: kpi(2, null),
     },
+    // Sums to calls_analyzed.current_value (12) -- see outcome_distribution's
+    // reconciliation invariant in aggregation.py.
+    outcome_distribution: { sale: 6, no_sale: 3, follow_up: 2, uncertain: 0, unknown: 1 },
     close_rate_trend: [
       { label: 'b1', start_date: '2026-07-21', end_date: '2026-07-23', calls_analyzed: 3, known_outcomes: 3, sales: 1, close_rate: 33.3 },
       { label: 'b2', start_date: '2026-07-23', end_date: '2026-07-25', calls_analyzed: 3, known_outcomes: 3, sales: 2, close_rate: 66.7 },
@@ -134,6 +137,7 @@ export function makeEmptyOverview(): OverviewSummary {
       calls_requiring_attention: kpi(0, 0),
       improved_agents_count: kpi(0, null),
     },
+    outcome_distribution: { sale: 0, no_sale: 0, follow_up: 0, uncertain: 0, unknown: 0 },
     close_rate_trend: [],
     improved_agents: [],
     attention_calls: [],

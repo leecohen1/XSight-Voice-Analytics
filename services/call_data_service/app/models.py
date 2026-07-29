@@ -368,11 +368,28 @@ class DataQuality(BaseModel):
     previous_period_records: int
 
 
+class OutcomeDistribution(BaseModel):
+    """Outcome mix for the selected period.
+
+    `sale + no_sale + follow_up + uncertain + unknown` always equals the
+    period's `calls_analyzed`: a call with no recorded outcome is counted
+    under `unknown` rather than silently dropped, so the chart the frontend
+    draws from this can always be reconciled against the headline KPI.
+    """
+
+    sale: int = 0
+    no_sale: int = 0
+    follow_up: int = 0
+    uncertain: int = 0
+    unknown: int = 0
+
+
 class OverviewResponse(BaseModel):
     period: PeriodWindow
     generated_at: datetime
     executive_summary: str
     kpis: OverviewKpis
+    outcome_distribution: OutcomeDistribution
     close_rate_trend: list[TrendBucket]
     improved_agents: list[ImprovedAgent]
     attention_calls: list[AttentionCall]

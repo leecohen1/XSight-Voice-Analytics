@@ -1,0 +1,112 @@
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+/* The top rule is the only place tone shows as a large colour field. It is
+   driven by meaning (see kpiSemantics), never by card order. */
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--kpi-tone, var(--color-status-neutral));
+}
+
+.tone_neutral   { --kpi-tone: var(--color-status-neutral); }
+.tone_success   { --kpi-tone: var(--color-status-success); }
+.tone_warning   { --kpi-tone: var(--color-status-warning); }
+.tone_critical  { --kpi-tone: var(--color-status-danger); }
+.tone_muted     { --kpi-tone: var(--color-border-strong); }
+
+/* A critical standing gets a tinted field as well as a rule -- attention
+   load is the one metric allowed to visually interrupt the grid. */
+.tone_critical {
+  background: linear-gradient(180deg, var(--color-status-danger-bg) 0%, var(--color-bg-surface) 60%);
+  border-color: var(--color-status-danger);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.label {
+  font-family: var(--font-instrument);
+  font-size: var(--text-xs);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.icon {
+  color: var(--kpi-tone, var(--color-text-muted));
+  display: flex;
+}
+
+.value {
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  line-height: 1.05;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.suffix {
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
+  color: var(--color-text-muted);
+  margin-left: var(--space-2);
+}
+
+.comparison {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+/* Direction colour is applied only to the comparison line, so the verdict
+   reads without recolouring the whole card. */
+.sentiment_positive { color: var(--color-status-success); }
+.sentiment_negative { color: var(--color-status-danger); }
+.sentiment_neutral  { color: var(--color-text-secondary); }
+.sentiment_unknown  { color: var(--color-text-muted); }
+
+.arrow {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.context {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* Supporting metrics are deliberately quieter: smaller value, no tinted
+   field, so they cannot compete with the primary business row. */
+.variant_supporting {
+  padding: var(--space-4);
+  background: var(--color-bg-app);
+}
+
+.variant_supporting .value {
+  font-size: var(--text-xl);
+}
+
+.variant_supporting::before {
+  opacity: 0.5;
+}

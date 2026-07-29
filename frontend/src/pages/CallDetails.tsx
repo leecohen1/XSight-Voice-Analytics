@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import type { CallProcessingCost, CallRecord, PipelineResponse, RagasEvaluation } from '../types'
+import type { CallRecord, PipelineResponse } from '../types'
 import { getCall, pipelineResponseToRecord } from '../services/callsApi'
-import { getCallCost, getCallEvaluation } from '../services/aiOperationsApi'
 import CallStatusIndicator from '../components/ui/CallStatusIndicator'
 import SectionCard from '../components/ui/SectionCard'
 import LoadingSkeleton from '../components/ui/LoadingSkeleton'
@@ -12,9 +11,6 @@ import Button from '../components/ui/Button'
 import OfficialAnalysisPanel from '../components/call-details/OfficialAnalysisPanel'
 import EvidenceSection from '../components/call-details/EvidenceSection'
 import TranscriptViewer from '../components/call-details/TranscriptViewer'
-import UsageCostPanel from '../components/call-details/UsageCostPanel'
-import QualityEvaluationPanel from '../components/call-details/QualityEvaluationPanel'
-import AskXsightPanel from '../components/ask-xsight/AskXsightPanel'
 import { ClockIcon, XCircleIcon } from '../components/icons'
 import styles from './CallDetails.module.css'
 
@@ -26,8 +22,6 @@ export default function CallDetails() {
   const justAnalyzed = (location.state as { justAnalyzed?: PipelineResponse } | null)?.justAnalyzed
   const [call, setCall] = useState<CallRecord | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
-  const [cost, setCost] = useState<CallProcessingCost | null>(null)
-  const [evaluation, setEvaluation] = useState<RagasEvaluation | null>(null)
 
   useEffect(() => {
     if (!callId) return
@@ -47,18 +41,6 @@ export default function CallDetails() {
           return
         }
         setCall(result)
-        if (result?.analysis) {
-          // Cost and RAGAS evaluation are optional side panels with no
-          // backend contract yet (see aiOperationsApi). They must degrade to
-          // "not shown" rather than reject unhandled or block the analysis
-          // the user actually came for.
-          getCallCost(callId)
-            .then((c) => !cancelled && setCost(c))
-            .catch(() => undefined)
-          getCallEvaluation(callId)
-            .then((e) => !cancelled && setEvaluation(e))
-            .catch(() => undefined)
-        }
       })
       .catch((err) => {
         if (cancelled) return
@@ -92,10 +74,17 @@ export default function CallDetails() {
 
   return (
     <>
+      {/* The raw call id is shown once, in the header meta line below --
+          repeating it here too was pure duplication. The breadcrumb's own
+          last segment is the same human-readable identity as the H1, which
+          is the normal breadcrumb convention, not a second copy of the id. */}
       <div className={styles.breadcrumb}>
         <Link to="/calls">Calls</Link>
         <span>/</span>
-        <span>{call.callId}</span>
+        <span>
+          {call.agentName}
+          {call.customerName ? ` · ${call.customerName}` : ''}
+        </span>
       </div>
 
       <div className={styles.header}>
@@ -149,10 +138,13 @@ export default function CallDetails() {
 
       {call.analysis && call.guardrailStatus && (
         <>
+          {/* humanReviewReasons reuses routerReasons -- the same shape
+              (HumanReviewReason = RouterReason), and the field that is
+              actually populated by the backend's router_reasons. */}
           <OfficialAnalysisPanel
             analysis={call.analysis}
             guardrailStatus={call.guardrailStatus}
-            humanReviewReasons={call.humanReviewReasons}
+            humanReviewReasons={call.routerReasons}
           />
 
           <div className={styles.section}>
@@ -161,25 +153,30 @@ export default function CallDetails() {
             </SectionCard>
           </div>
 
+          {/* Collapsed by default: this supports the analysis above it, and
+              an executive scanning the page should not have to pass a wall
+              of raw dialogue before reaching the verdict and action -- which
+              is already true, since it renders after them; collapsing it
+              too keeps the initial scroll to those sections short. */}
           <div className={styles.section}>
-            <SectionCard title="Full Transcript" collapsible className={styles.operationalSection}>
+            <SectionCard title="Full Transcript" collapsible defaultOpen={false} className={styles.operationalSection}>
               <TranscriptViewer transcript={call.analysis.transcript} />
             </SectionCard>
           </div>
 
-          <div className={styles.section}>
-            <SectionCard title="AI Processing Cost" subtitle="Usage & Cost for this call" collapsible className={styles.operationalSection}>
-              <UsageCostPanel cost={cost} />
-            </SectionCard>
-          </div>
-
-          <div className={styles.section}>
-            <SectionCard title="Quality Evaluation" subtitle="Evaluation Framework: RAGAS" collapsible className={styles.operationalSection}>
-              <QualityEvaluationPanel evaluation={evaluation} />
-            </SectionCard>
-          </div>
-
-          <AskXsightPanel callId={call.callId} />
+          {/* AI Processing Cost, Quality Evaluation (RAGAS) and Ask XSight
+              are intentionally not rendered here. Their data comes from
+              aiOperationsApi/askXsightApi, which are mock-only -- no backend
+              contract exists yet (see services/usage_monitoring_service for
+              a candidate reference API for cost/quality). In the real
+              deployed configuration (VITE_USE_MOCK=false) they always threw
+              and silently resolved to "not shown", so every real call showed
+              three permanently-empty collapsed sections. Removed rather than
+              replaced with fake data or a "Coming Soon" block; see
+              docs/PROGRESS.md for the future-module note. The components
+              (UsageCostPanel, QualityEvaluationPanel, AskXsightPanel) and
+              their APIs are untouched and ready to reconnect once a real
+              contract exists. */}
         </>
       )}
     </>

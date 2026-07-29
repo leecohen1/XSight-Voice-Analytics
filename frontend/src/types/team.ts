@@ -59,6 +59,10 @@ export interface TeamPerformanceSummary {
   callsAnalyzed: number
   teamAverageAgentPerformance: number | null
   teamAverageLeadQuality: number | null
+  /** Sale / calls-with-a-known-outcome * 100, same exclusion rule as
+      call_data_service's own close_rate: 'Uncertain' and missing outcomes
+      are excluded from the denominator, not counted as losses. */
+  teamCloseRate: number | null
   attentionCalls: number
   performanceTrend: TrendPoint[]
   agents: AgentPerformanceSummary[]
