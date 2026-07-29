@@ -48,3 +48,16 @@
   color: var(--color-text-secondary);
   line-height: var(--line-relaxed);
 }
+
+/* The citation chip is wrapped in a router Link so the evidence trail is
+   followable; the link itself must stay invisible so the chip keeps reading
+   as an annotation mark rather than turning into a second button style. */
+.citationLink {
+  text-decoration: none;
+  border-radius: var(--radius-sm, 4px);
+}
+
+.citationLink:focus-visible {
+  outline: 2px solid var(--color-accent-signal, currentColor);
+  outline-offset: 2px;
+}

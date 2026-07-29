@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { SimilarCall } from '../../types'
 import CitationChip from '../ui/CitationChip'
 import StatusBadge from '../ui/StatusBadge'
@@ -31,10 +32,21 @@ export default function SimilarCallsList({ calls }: SimilarCallsListProps) {
       {calls.map((call) => (
         <div className={styles.card} key={call.call_id}>
           <div className={styles.header}>
-            <CitationChip label={call.call_id} title="Historical call citation" />
+            {/* The citation is the evidence trail — it has to be followable.
+                Every cited id comes from the retrieval corpus, which is seeded
+                into call_data_service, so this resolves; if a citation ever
+                outlives its record the target renders its "Call not found"
+                state rather than a broken page. */}
+            <Link to={`/calls/${call.call_id}`} className={styles.citationLink}>
+              <CitationChip label={call.call_id} title={`Open ${call.call_id}`} />
+            </Link>
             <span className={styles.agentName}>{call.agent_name}</span>
             <StatusBadge label={call.sale_result} tone={outcomeTone(call.sale_result)} />
-            <span className={styles.similarity}>{Math.round(call.similarity_score * 100)}% similar</span>
+            {/* A missing score is left out entirely — rendering Math.round(null*100)
+                printed "NaN% similar", which reads as a real measurement. */}
+            {Number.isFinite(call.similarity_score) && (
+              <span className={styles.similarity}>{Math.round(call.similarity_score * 100)}% similar</span>
+            )}
           </div>
           <p className={styles.objection}>
             Objection: <strong>{call.main_objection}</strong>

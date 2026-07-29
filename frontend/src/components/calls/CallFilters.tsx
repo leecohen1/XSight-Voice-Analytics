@@ -4,7 +4,19 @@ import styles from './CallFilters.module.css'
 
 export type CallStatusFilter = 'All' | CallDisplayStatus
 
-const FILTERS: CallStatusFilter[] = ['All', 'Processing', 'Ready', 'Needs Review', 'Flagged', 'Failed']
+/**
+ * Only the statuses a stored call can actually have.
+ *
+ * `call_data_service` persists one of `completed | flagged |
+ * human_review_required`, and `toCallStatus` narrows anything else onto that
+ * set, so `toDisplayStatus` can only ever return 'Ready', 'Needs Review' or
+ * 'Flagged'. 'Processing' and 'Failed' were offered here too and matched
+ * nothing by construction — a filter that always returns an empty list reads
+ * as "you have no failed calls" when the truth is "this app cannot tell you
+ * that". They belong to the in-flight pipeline states in `CallStatus`, which
+ * are never written to storage.
+ */
+const FILTERS: CallStatusFilter[] = ['All', 'Ready', 'Needs Review', 'Flagged']
 
 export interface CallFiltersProps {
   search: string
