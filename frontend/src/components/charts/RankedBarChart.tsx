@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import styles from './RankedBarChart.module.css'
 
 export interface RankedBar {
@@ -47,41 +48,50 @@ export default function RankedBarChart({
       {bars.map((bar) => {
         const lowSample = bar.sampleSize < minConfidentSample
         const pct = bar.value === null ? 0 : Math.min(100, (bar.value / max) * 100)
-        const RowTag = bar.href ? 'a' : 'div'
-        const rowProps = bar.href ? { href: bar.href } : {}
+        const ariaLabel =
+          bar.value === null
+            ? `${bar.label}: not scored, ${bar.sampleSize} calls`
+            : `${bar.label}: ${formatValue(bar.value)} out of ${max}, based on ${bar.sampleSize} calls${lowSample ? ', low sample' : ''}`
+
+        const content = (
+          <>
+            <span className={styles.label}>{bar.label}</span>
+
+            <span className={styles.track}>
+              <span
+                className={[styles.fill, lowSample ? styles.fillLowSample : ''].join(' ')}
+                style={{ width: `${pct}%` }}
+              />
+            </span>
+
+            <span className={[styles.value, bar.value === null ? styles.valueMissing : ''].join(' ')}>
+              {bar.value === null ? '—' : formatValue(bar.value)}
+              <span className={styles.max}>/ {max}</span>
+            </span>
+
+            <span className={styles.sample}>
+              {bar.sampleSize} call{bar.sampleSize === 1 ? '' : 's'}
+              {lowSample && <span className={styles.lowSampleTag}>low sample</span>}
+            </span>
+
+            {bar.meta && <span className={styles.meta}>{bar.meta}</span>}
+          </>
+        )
 
         return (
           <li key={bar.key}>
-            <RowTag
-              {...rowProps}
-              className={[styles.row, bar.href ? styles.rowLink : ''].join(' ')}
-              aria-label={
-                bar.value === null
-                  ? `${bar.label}: not scored, ${bar.sampleSize} calls`
-                  : `${bar.label}: ${formatValue(bar.value)} out of ${max}, based on ${bar.sampleSize} calls${lowSample ? ', low sample' : ''}`
-              }
-            >
-              <span className={styles.label}>{bar.label}</span>
-
-              <span className={styles.track}>
-                <span
-                  className={[styles.fill, lowSample ? styles.fillLowSample : ''].join(' ')}
-                  style={{ width: `${pct}%` }}
-                />
-              </span>
-
-              <span className={[styles.value, bar.value === null ? styles.valueMissing : ''].join(' ')}>
-                {bar.value === null ? '—' : formatValue(bar.value)}
-                <span className={styles.max}>/ {max}</span>
-              </span>
-
-              <span className={styles.sample}>
-                {bar.sampleSize} call{bar.sampleSize === 1 ? '' : 's'}
-                {lowSample && <span className={styles.lowSampleTag}>low sample</span>}
-              </span>
-
-              {bar.meta && <span className={styles.meta}>{bar.meta}</span>}
-            </RowTag>
+            {/* A real router Link, not a plain <a> or a button onClick --
+                a manager can open a representative's calls in a new tab,
+                and clicking does not trigger a full page reload. */}
+            {bar.href ? (
+              <Link to={bar.href} className={[styles.row, styles.rowLink].join(' ')} aria-label={ariaLabel}>
+                {content}
+              </Link>
+            ) : (
+              <div className={styles.row} aria-label={ariaLabel}>
+                {content}
+              </div>
+            )}
           </li>
         )
       })}

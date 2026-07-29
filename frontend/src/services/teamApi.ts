@@ -19,15 +19,37 @@ import type {
   AttentionBreakdownEntry,
   CallListItem,
   OutcomeBreakdownEntry,
+  OverviewPeriod,
   TeamInsight,
   TeamPerformanceSummary,
   TrendPoint,
 } from '../types'
 import { listCalls } from './callsApi'
+import { buildTeamSummary } from '../analytics/executiveSummary'
 
 export interface TeamIntelligenceData {
   insight: TeamInsight
   summary: TeamPerformanceSummary
+}
+
+const PERIOD_DAYS: Record<OverviewPeriod, number> = { '7d': 7, '30d': 30 }
+const PERIOD_LABEL: Record<OverviewPeriod, string> = { '7d': 'this week', '30d': 'this month' }
+
+/**
+ * Rolling N-day window ending now, computed client-side over the complete
+ * fetched list. `listCalls()` currently has no server-side pagination in
+ * front of it (limit=200, comfortably above the live dataset size), so
+ * filtering here is safe and complete today -- the same "operates over the
+ * full set" reasoning already used in analytics/callGrouping.ts. This is
+ * the same rolling-window *spirit* as Overview's 7d/30d, not a byte-for-byte
+ * replica of its server-computed window_bounds() -- Overview's boundaries
+ * live in call_data_service and are not something the frontend can or
+ * should reimplement. If GET /calls ever gains real pagination, this must
+ * move server-side, the same migration note callGrouping.ts already carries.
+ */
+export function filterByPeriod(calls: CallListItem[], period: OverviewPeriod, now: Date): CallListItem[] {
+  const cutoff = new Date(now.getTime() - PERIOD_DAYS[period] * 24 * 60 * 60 * 1000)
+  return calls.filter((c) => new Date(c.createdAt) >= cutoff)
 }
 
 /** Mean of the defined values, or null when there are none. Rounded to 1dp. */
@@ -82,15 +104,28 @@ function performanceTrend(calls: CallListItem[]): TrendPoint[] {
     .sort((a, b) => a.date.localeCompare(b.date))
 }
 
-export function aggregateTeamIntelligence(calls: CallListItem[], now = new Date()): TeamIntelligenceData {
+export function aggregateTeamIntelligence(
+  calls: CallListItem[],
+  period: OverviewPeriod = '7d',
+  now = new Date()
+): TeamIntelligenceData {
   const generatedAt = now.toISOString()
 
   if (calls.length === 0) {
+    const empty = buildTeamSummary({
+      callsAnalyzed: 0,
+      agentCount: 0,
+      teamPerformance: null,
+      attentionCalls: 0,
+      agentsNeedingAttention: [],
+      improvingAgents: [],
+      periodLabel: PERIOD_LABEL[period],
+    })
     return {
       insight: {
         id: 'team-empty',
-        headline: 'No analyzed calls yet',
-        detail: 'Team intelligence appears once calls have been analyzed.',
+        headline: empty.headline,
+        detail: empty.detail,
         generatedAt,
       },
       summary: {
@@ -99,6 +134,7 @@ export function aggregateTeamIntelligence(calls: CallListItem[], now = new Date(
         callsAnalyzed: 0,
         teamAverageAgentPerformance: null,
         teamAverageLeadQuality: null,
+        teamCloseRate: null,
         attentionCalls: 0,
         performanceTrend: [],
         agents: [],
@@ -111,6 +147,7 @@ export function aggregateTeamIntelligence(calls: CallListItem[], now = new Date(
   const timestamps = calls.map((c) => c.createdAt).sort((a, b) => a.localeCompare(b))
   const teamPerformance = mean(calls.map((c) => c.agentPerformanceScore))
   const teamLeadQuality = mean(calls.map((c) => c.leadQualityScore))
+  const teamCloseRate = closeRate(calls)
   const attentionCalls = calls.filter((c) => c.attentionRequired).length
 
   // Group by display name. call_data_service normalizes agent names on write
@@ -169,32 +206,24 @@ export function aggregateTeamIntelligence(calls: CallListItem[], now = new Date(
   const needsCoaching = agents.filter((a) => a.attentionCalls > 0)
   const improving = agents.filter((a) => a.trendDirection === 'improving')
 
-  // The headline states counts that are visible on the page directly beneath
-  // it, so a manager can verify every claim against the same screen.
-  const headline =
-    attentionCalls > 0
-      ? `${attentionCalls} of ${calls.length} analyzed calls need attention`
-      : `${calls.length} calls analyzed, none currently need attention`
-
-  const detailParts = [
-    teamPerformance === null
-      ? 'No agent performance scores are recorded yet.'
-      : `Team average agent performance is ${teamPerformance.toFixed(1)} out of 5 across ${byAgent.size} representative${byAgent.size === 1 ? '' : 's'}.`,
-  ]
-  if (needsCoaching.length > 0) {
-    detailParts.push(
-      `${needsCoaching.map((a) => a.agentName).join(', ')} ${needsCoaching.length === 1 ? 'has' : 'have'} calls flagged for attention.`
-    )
-  }
-  if (improving.length > 0) {
-    detailParts.push(`${improving.map((a) => a.agentName).join(', ')} improved versus their earlier calls.`)
-  }
+  // buildTeamSummary handles the grammar cases that broke in production:
+  // when every representative qualifies for a clause, it collapses to
+  // "all 4 representatives" instead of listing every name twice in a row.
+  const { headline, detail } = buildTeamSummary({
+    callsAnalyzed: calls.length,
+    agentCount: byAgent.size,
+    teamPerformance,
+    attentionCalls,
+    agentsNeedingAttention: needsCoaching.map((a) => a.agentName),
+    improvingAgents: improving.map((a) => a.agentName),
+    periodLabel: PERIOD_LABEL[period],
+  })
 
   return {
     insight: {
       id: 'team-derived',
       headline,
-      detail: detailParts.join(' '),
+      detail,
       generatedAt,
     },
     summary: {
@@ -203,6 +232,7 @@ export function aggregateTeamIntelligence(calls: CallListItem[], now = new Date(
       callsAnalyzed: calls.length,
       teamAverageAgentPerformance: teamPerformance,
       teamAverageLeadQuality: teamLeadQuality,
+      teamCloseRate,
       attentionCalls,
       performanceTrend: performanceTrend(calls),
       agents,
@@ -212,7 +242,11 @@ export function aggregateTeamIntelligence(calls: CallListItem[], now = new Date(
   }
 }
 
-export async function getTeamIntelligence(signal?: AbortSignal): Promise<TeamIntelligenceData> {
+export async function getTeamIntelligence(
+  period: OverviewPeriod = '7d',
+  signal?: AbortSignal
+): Promise<TeamIntelligenceData> {
   const calls = await listCalls(signal)
-  return aggregateTeamIntelligence(calls)
+  const now = new Date()
+  return aggregateTeamIntelligence(filterByPeriod(calls, period, now), period, now)
 }

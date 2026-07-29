@@ -7,7 +7,7 @@
  * later "tidies up" a null into a 0.
  */
 import { describe, expect, it } from 'vitest'
-import { aggregateTeamIntelligence } from './teamApi'
+import { aggregateTeamIntelligence, filterByPeriod } from './teamApi'
 import type { CallListItem } from '../types'
 
 function call(overrides: Partial<CallListItem> = {}): CallListItem {
@@ -35,7 +35,7 @@ describe('aggregateTeamIntelligence', () => {
     expect(summary.teamAverageAgentPerformance).toBeNull()
     expect(summary.teamAverageLeadQuality).toBeNull()
     expect(summary.agents).toEqual([])
-    expect(insight.headline).toMatch(/no analyzed calls/i)
+    expect(insight.headline).toMatch(/no calls analyzed/i)
   })
 
   it('averages the scores the backend actually returned', () => {
@@ -176,6 +176,61 @@ describe('aggregateTeamIntelligence', () => {
       call(),
       call(),
     ])
-    expect(insight.headline).toBe(`${summary.attentionCalls} of ${summary.callsAnalyzed} analyzed calls need attention`)
+    expect(insight.headline).toBe(`${summary.attentionCalls} call of ${summary.callsAnalyzed} need attention this week`)
+  })
+})
+
+describe('filterByPeriod', () => {
+  const NOW = new Date('2026-07-28T12:00:00Z')
+
+  it('keeps calls within the last 7 days and drops older ones', () => {
+    const calls = [
+      call({ callId: 'A', createdAt: '2026-07-27T00:00:00Z' }), // 1 day ago
+      call({ callId: 'B', createdAt: '2026-07-01T00:00:00Z' }), // 27 days ago
+    ]
+    const kept = filterByPeriod(calls, '7d', NOW)
+    expect(kept.map((c) => c.callId)).toEqual(['A'])
+  })
+
+  it('keeps calls within the last 30 days and drops older ones', () => {
+    const calls = [
+      call({ callId: 'A', createdAt: '2026-07-01T00:00:00Z' }), // 27 days ago
+      call({ callId: 'B', createdAt: '2026-05-01T00:00:00Z' }), // ~89 days ago
+    ]
+    const kept = filterByPeriod(calls, '30d', NOW)
+    expect(kept.map((c) => c.callId)).toEqual(['A'])
+  })
+
+  it('returns an empty list when nothing falls in the window', () => {
+    const calls = [call({ createdAt: '2026-01-01T00:00:00Z' })]
+    expect(filterByPeriod(calls, '7d', NOW)).toEqual([])
+  })
+})
+
+describe('teamCloseRate', () => {
+  it('excludes Uncertain from the team-wide close rate denominator', () => {
+    const { summary } = aggregateTeamIntelligence([
+      call({ callOutcome: 'Sale' }),
+      call({ callOutcome: 'No Sale' }),
+      call({ callOutcome: 'Uncertain' }),
+    ])
+    expect(summary.teamCloseRate).toBe(50)
+  })
+
+  it('is null when nothing has a known outcome', () => {
+    const { summary } = aggregateTeamIntelligence([call({ callOutcome: undefined })])
+    expect(summary.teamCloseRate).toBeNull()
+  })
+})
+
+describe('period-aware copy', () => {
+  it('labels the headline for this week on 7d', () => {
+    const { insight } = aggregateTeamIntelligence([call({ attentionRequired: true })], '7d')
+    expect(insight.headline).toContain('this week')
+  })
+
+  it('labels the headline for this month on 30d', () => {
+    const { insight } = aggregateTeamIntelligence([call({ attentionRequired: true })], '30d')
+    expect(insight.headline).toContain('this month')
   })
 })

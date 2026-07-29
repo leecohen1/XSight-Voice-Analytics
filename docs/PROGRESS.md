@@ -479,3 +479,27 @@ snake_case) metadata line. The breadcrumb no longer repeats the raw call
 UUID (shown once, in the header meta line) — its last segment now matches
 the H1's human-readable agent/customer name, the standard breadcrumb
 convention.
+
+**Team Intelligence** (Phase 7): added a 7d/30d period filter (client-side,
+same semantics as Overview but computed over the complete `listCalls()`
+result rather than a backend window — safe today since that fetch has no
+real pagination yet; see `filterByPeriod` in `teamApi.ts` for the exact
+migration note). The noisy daily performance-trend sparkline was replaced
+with **Representative Performance** — a `RankedBarChart` on a fixed 0–5
+domain, sorted weakest-first, with each bar's sample size always visible and
+bars under 4 calls visually flagged as low-sample. Added a real
+`teamCloseRate` KPI (reusing the same close-rate exclusion rule as
+`call_data_service` and the per-agent calculation: 'Uncertain' and missing
+outcomes excluded from the denominator). Lead Quality demoted to a
+supporting-metric text line rather than a primary card. The narrative
+grammar fix (`buildTeamSummary`, built in the Phase 2 design-system pass but
+unused until now) replaced the ad-hoc headline construction that used to
+list every representative's name twice when all of them qualified for a
+clause.
+
+**Bug found and fixed while testing this phase:** `RankedBarChart`'s linked
+rows used a plain `<a href>` instead of React Router's `Link` — clicking one
+would have triggered a full page reload in the real app instead of
+client-side navigation. Caught by a test that asserted the click actually
+navigated within the `MemoryRouter`, not just that an href attribute
+existed.
