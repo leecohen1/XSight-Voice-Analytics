@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { CallListItem } from '../../types'
+import { outcomeTone } from '../../analytics/outcomeSemantics'
 import CallStatusIndicator from '../ui/CallStatusIndicator'
 import StatusBadge from '../ui/StatusBadge'
 import { ChevronRightIcon } from '../icons'
@@ -11,13 +12,6 @@ export interface CallListItemRowProps {
       agent's name is the group header and repeating it on every row
       would be pure noise. */
   hideAgentName?: boolean
-}
-
-function outcomeTone(outcome?: string): 'success' | 'danger' | 'warning' | 'neutral' {
-  if (outcome === 'Sale') return 'success'
-  if (outcome === 'No Sale') return 'danger'
-  if (outcome === 'Follow-up Needed') return 'warning'
-  return 'neutral'
 }
 
 /**

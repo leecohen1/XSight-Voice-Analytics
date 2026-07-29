@@ -1,16 +1,11 @@
 import { Link } from 'react-router-dom'
 import type { SimilarCall } from '../../types'
+import { outcomeTone } from '../../analytics/outcomeSemantics'
 import CitationChip from '../ui/CitationChip'
 import StatusBadge from '../ui/StatusBadge'
 import EmptyState from '../ui/EmptyState'
 import { LinkIcon } from '../icons'
 import styles from './SimilarCallsList.module.css'
-
-function outcomeTone(result: string): 'success' | 'danger' | 'neutral' {
-  if (result === 'Sale') return 'success'
-  if (result === 'No Sale') return 'danger'
-  return 'neutral'
-}
 
 export interface SimilarCallsListProps {
   calls: SimilarCall[]

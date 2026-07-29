@@ -87,7 +87,7 @@ function outcomeSlices(data: OverviewSummary) {
   return [
     { key: 'sale', label: 'Sale', value: d.sale, color: 'var(--color-status-success)' },
     { key: 'no_sale', label: 'No Sale', value: d.no_sale, color: 'var(--color-status-danger)' },
-    { key: 'follow_up', label: 'Follow-up', value: d.follow_up, color: 'var(--color-status-warning)' },
+    { key: 'follow_up', label: 'Follow-up Needed', value: d.follow_up, color: 'var(--color-status-warning)' },
     { key: 'uncertain', label: 'Uncertain', value: d.uncertain, color: 'var(--color-status-review)' },
     ...(d.unknown > 0 ? [{ key: 'unknown', label: 'Not recorded', value: d.unknown, color: 'var(--color-text-muted)' }] : []),
   ]

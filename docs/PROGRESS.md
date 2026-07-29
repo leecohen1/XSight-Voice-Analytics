@@ -503,3 +503,33 @@ would have triggered a full page reload in the real app instead of
 client-side navigation. Caught by a test that asserted the click actually
 navigated within the `MemoryRouter`, not just that an href attribute
 existed.
+
+**Cross-screen consistency audit** (Phase 8): found and fixed two real
+drift bugs, not just reviewed for them.
+
+1. **Three separately-defined `outcomeTone` functions had silently
+   diverged.** `CallListItemRow.tsx` (Calls table) gave "Follow-up Needed"
+   its own amber warning tone; `OfficialAnalysisPanel.tsx` (Call Details)
+   and `SimilarCallsList.tsx` both mapped it to plain neutral grey — the
+   same outcome value read as urgent on one screen and unremarkable on two
+   others. Unified into `frontend/src/analytics/outcomeSemantics.ts`,
+   exporting one `outcomeTone` every screen now imports rather than
+   redefines. Kept the warning treatment (the more correct one): Follow-up
+   Needed is a distinct, actionable, open state and must not be visually
+   indistinguishable from a genuinely uncertain one.
+2. **Overview's donut legend said "Follow-up"** while the KPI card beside
+   it, Calls, Call Details and Team Intelligence's outcome breakdown all say
+   "Follow-up Needed" (the actual backend enum value). Fixed to match.
+
+Verified consistent (no fix needed): confidence always renders as `%`
+(`ConfidenceIndicator`, `CallListItemRow`); missing values always render as
+an em dash, never `0`, everywhere a KpiMetric/score/confidence is shown;
+`attentionRequired`/`attentionCategory`/`attentionPriority` flow from a
+single `toCallListItem`/`toCallRecord` mapping, so "Calls Requiring
+Attention" cannot have two different definitions on two screens; the
+"Needs Review" (compact badge) vs "Human Review Required" (full banner
+sentence) difference is a deliberate two-tier convention applied
+identically for every status, not an accidental drift. All Overview -> Calls
+Requiring Attention -> Call Details -> Similar Historical Call, and
+Team/Calls -> representative-filtered Calls, navigation links confirmed
+present and tested.

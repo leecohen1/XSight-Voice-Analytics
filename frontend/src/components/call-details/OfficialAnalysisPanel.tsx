@@ -1,4 +1,5 @@
 import type { CallAnalysisResult, GuardrailStatus, HumanReviewReason } from '../../types'
+import { outcomeTone } from '../../analytics/outcomeSemantics'
 import StatusBadge, { type StatusTone } from '../ui/StatusBadge'
 import ConfidenceIndicator from '../ui/ConfidenceIndicator'
 import SectionCard from '../ui/SectionCard'
@@ -11,12 +12,6 @@ import styles from './OfficialAnalysisPanel.module.css'
 function sentimentTone(sentiment: string): StatusTone {
   if (sentiment === 'positive') return 'success'
   if (sentiment === 'negative') return 'danger'
-  return 'neutral'
-}
-
-function outcomeTone(outcome: string): StatusTone {
-  if (outcome === 'Sale') return 'success'
-  if (outcome === 'No Sale') return 'danger'
   return 'neutral'
 }
 
