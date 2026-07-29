@@ -38,6 +38,7 @@ function overview(overrides: Partial<OverviewSummary> = {}): OverviewSummary {
       calls_requiring_attention: kpi(2, 0),
       improved_agents_count: kpi(0),
     },
+    outcome_distribution: { sale: 3, no_sale: 3, follow_up: 3, uncertain: 0, unknown: 0 },
     close_rate_trend: [],
     improved_agents: [],
     attention_calls: [],

@@ -440,9 +440,18 @@ Full stored record including the transcript. `404 CALL_NOT_FOUND` if absent.
 ### `GET /overview?period=7d|30d`
 
 The entire Overview screen, pre-aggregated: `period`, `generated_at`,
-`executive_summary`, `kpis`, `close_rate_trend`, `improved_agents`,
-`attention_calls`, `recent_calls`, `data_quality`. All business calculation
-happens here; the frontend renders the returned values without recomputing.
+`executive_summary`, `kpis`, `outcome_distribution`, `close_rate_trend`,
+`improved_agents`, `attention_calls`, `recent_calls`, `data_quality`. All
+business calculation happens here; the frontend renders the returned values
+without recomputing.
+
+`outcome_distribution` (`{sale, no_sale, follow_up, uncertain, unknown}`)
+counts every call in the selected window by outcome, added for the Overview
+redesign's donut chart. Unlike `close_rate`, which excludes "Uncertain" from
+its denominator, nothing is excluded here: a call with a missing or
+unrecognised outcome is counted under `unknown` rather than dropped, so the
+five buckets always sum to `kpis.calls_analyzed.current_value` for the same
+window (see `test_outcome_distribution.py`).
 
 ```bash
 curl -s "http://localhost:8006/overview?period=30d"

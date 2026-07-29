@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { getOverview } from '../services/analyticsApi'
 import type { AttentionCall, KpiMetric, OverviewPeriod, OverviewSummary, RecentCall } from '../types'
 import { ATTENTION_CATEGORY_LABELS } from '../types'
+import { buildExecutiveSummary } from '../analytics/executiveSummary'
 import PageHeader from '../components/ui/PageHeader'
-import MetricCard, { type MetricCardTone } from '../components/ui/MetricCard'
+import KpiCard from '../components/ui/KpiCard'
 import SectionCard from '../components/ui/SectionCard'
 import LoadingSkeleton from '../components/ui/LoadingSkeleton'
 import ErrorState from '../components/ui/ErrorState'
 import EmptyState from '../components/ui/EmptyState'
 import Button from '../components/ui/Button'
-import TrendSparkline from '../components/charts/TrendSparkline'
+import DonutChart from '../components/charts/DonutChart'
+import PeriodTrendChart from '../components/charts/PeriodTrendChart'
 import { buttonClassName } from '../components/ui/buttonClassName'
-import { CallsIcon, AiOperationsIcon, AlertIcon, TeamIcon } from '../components/icons'
+import { CallsIcon, AiOperationsIcon, AlertIcon } from '../components/icons'
 import styles from './Overview.module.css'
 
 const PERIOD_OPTIONS: { value: OverviewPeriod; label: string }[] = [
@@ -21,50 +23,29 @@ const PERIOD_OPTIONS: { value: OverviewPeriod; label: string }[] = [
 ]
 
 /**
- * KPI presentation config. The values themselves are computed by
- * call_data_service — this only decides icon, tone and formatting.
+ * Four primary KPIs, not six equally-weighted cards -- the business
+ * outcome, the volume behind it, what needs action, and what is still
+ * open. "Follow-up Needed" stands in for a "recovery opportunities" count:
+ * `attention_calls` is capped at a handful of rows server-side, so counting
+ * from it here would silently undercount in any period with more attention
+ * items than fit that list. `outcome_distribution.follow_up` is a real,
+ * complete, non-paginated count for the exact same window.
  */
-const KPI_CARDS = [
-  { key: 'calls_analyzed', label: 'Calls Analyzed', icon: CallsIcon, tone: 'primary', format: 'count' },
-  { key: 'close_rate', label: 'Close Rate', icon: AiOperationsIcon, tone: 'secondary', format: 'percent' },
-  { key: 'calls_requiring_attention', label: 'Needs Attention', icon: AlertIcon, tone: 'violet', format: 'count' },
-  { key: 'average_agent_performance', label: 'Avg. Agent Performance', icon: TeamIcon, tone: 'success', format: 'score' },
-  { key: 'average_lead_quality', label: 'Avg. Lead Quality', icon: AiOperationsIcon, tone: 'secondary', format: 'score' },
-  { key: 'improved_agents_count', label: 'Improved Agents', icon: TeamIcon, tone: 'success', format: 'count' },
+const PRIMARY_KPIS = [
+  { key: 'calls_analyzed', label: 'Calls Analyzed', icon: CallsIcon, format: 'count' as const },
+  { key: 'close_rate', label: 'Close Rate', icon: AiOperationsIcon, format: 'percent' as const },
+  { key: 'calls_requiring_attention', label: 'Needs Attention', icon: AlertIcon, format: 'count' as const },
 ] as const
 
-/**
- * `null` is a real, meaningful value from the backend — it means "not
- * measured in this window", which is not the same as zero. It is rendered as
- * an em dash rather than being coerced to 0.
- */
-function formatValue(metric: KpiMetric, format: string): string {
-  const value = metric.current_value
-  if (value === null || value === undefined) return '—'
-  if (format === 'percent') return `${value}%`
-  if (format === 'score') return value.toFixed(1)
-  return String(Math.round(value))
-}
+const SUPPORTING_KPIS = [
+  { key: 'average_agent_performance', label: 'Avg. Agent Performance', format: 'score' as const },
+  { key: 'average_lead_quality', label: 'Avg. Lead Quality', format: 'score' as const },
+  { key: 'improved_agents_count', label: 'Improved Representatives', format: 'count' as const },
+] as const
 
-function formatComparison(metric: KpiMetric, format: string): string {
-  if (metric.previous_value === null || metric.previous_value === undefined) {
-    return 'no comparable previous period'
-  }
-  if (metric.absolute_change === null) return 'no change data'
-
-  const change = metric.absolute_change
-  const sign = change > 0 ? '+' : ''
-  const magnitude = format === 'score' ? change.toFixed(2) : format === 'percent' ? `${change}%` : String(Math.round(change))
-  // A percentage change of null means the previous value was zero, so the
-  // ratio is undefined — say so instead of printing a fabricated number.
-  const pct = metric.percentage_change === null ? '' : ` (${metric.percentage_change > 0 ? '+' : ''}${metric.percentage_change}%)`
-  if (change === 0) return 'unchanged vs. previous period'
-  return `${sign}${magnitude}${pct} vs. previous period`
-}
-
-function AttentionRow({ call, onOpen }: { call: AttentionCall; onOpen: (id: string) => void }) {
+function AttentionRow({ call }: { call: AttentionCall }) {
   return (
-    <button type="button" className={styles.attentionRow} onClick={() => onOpen(call.call_id)}>
+    <Link to={`/calls/${call.call_id}`} className={styles.attentionRow}>
       <span className={`${styles.priorityDot} ${styles[`priority_${call.priority}`]}`} aria-hidden="true" />
       <span className={styles.attentionMain}>
         <span className={styles.attentionAgent}>
@@ -77,13 +58,13 @@ function AttentionRow({ call, onOpen }: { call: AttentionCall; onOpen: (id: stri
         <span className={styles.attentionCategory}>{ATTENTION_CATEGORY_LABELS[call.category]}</span>
         <span className={styles.attentionScore}>{call.priority}</span>
       </span>
-    </button>
+    </Link>
   )
 }
 
-function RecentRow({ call, onOpen }: { call: RecentCall; onOpen: (id: string) => void }) {
+function RecentRow({ call }: { call: RecentCall }) {
   return (
-    <button type="button" className={styles.recentRow} onClick={() => onOpen(call.call_id)}>
+    <Link to={`/calls/${call.call_id}`} className={styles.recentRow}>
       <span className={styles.attentionMain}>
         <span className={styles.attentionAgent}>
           {call.agent_name}
@@ -95,12 +76,24 @@ function RecentRow({ call, onOpen }: { call: RecentCall; onOpen: (id: string) =>
         <span className={styles.attentionCategory}>{call.call_outcome ?? 'Outcome not recorded'}</span>
         {call.source === 'live_analysis' && <span className={styles.liveBadge}>Live</span>}
       </span>
-    </button>
+    </Link>
   )
 }
 
+/** Outcome slices in a fixed, meaningful order -- decided outcomes first,
+    open/unknown last, so the legend reads like a funnel. */
+function outcomeSlices(data: OverviewSummary) {
+  const d = data.outcome_distribution
+  return [
+    { key: 'sale', label: 'Sale', value: d.sale, color: 'var(--color-status-success)' },
+    { key: 'no_sale', label: 'No Sale', value: d.no_sale, color: 'var(--color-status-danger)' },
+    { key: 'follow_up', label: 'Follow-up', value: d.follow_up, color: 'var(--color-status-warning)' },
+    { key: 'uncertain', label: 'Uncertain', value: d.uncertain, color: 'var(--color-status-review)' },
+    ...(d.unknown > 0 ? [{ key: 'unknown', label: 'Not recorded', value: d.unknown, color: 'var(--color-text-muted)' }] : []),
+  ]
+}
+
 export default function Overview() {
-  const navigate = useNavigate()
   const [period, setPeriod] = useState<OverviewPeriod>('7d')
   const [data, setData] = useState<OverviewSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -132,7 +125,6 @@ export default function Overview() {
     }
   }, [period, reloadToken])
 
-  const openCall = useCallback((callId: string) => navigate(`/calls/${callId}`), [navigate])
   const retry = useCallback(() => setReloadToken((n) => n + 1), [])
 
   const periodSelector = (
@@ -177,6 +169,20 @@ export default function Overview() {
   }
 
   const hasCalls = (data.kpis.calls_analyzed.current_value ?? 0) > 0
+  const headline = buildExecutiveSummary(data)
+
+  // A KpiMetric shape for follow_up so it renders through the same KpiCard
+  // as every other primary metric. There is no previous-period comparison
+  // for outcome_distribution yet, so previous/absolute/percentage are
+  // honestly null rather than invented -- KpiCard already renders that as
+  // "Not enough comparison data".
+  const followUpMetric: KpiMetric = {
+    current_value: data.outcome_distribution.follow_up,
+    previous_value: null,
+    absolute_change: null,
+    percentage_change: null,
+    trend_direction: 'unknown',
+  }
 
   return (
     <>
@@ -186,13 +192,14 @@ export default function Overview() {
             <span className={styles.heroEyebrowDot} aria-hidden="true" />
             Sales Intelligence · Overview
           </span>
-          <h1 className={styles.heroTitle}>{data.executive_summary}</h1>
-          <p className={styles.heroInsight}>
-            Every call, reconciled across transcript, retrieval, and signal evidence into one grounded read — so you
-            know exactly which deals need your attention today.
-          </p>
+          <h1 className={styles.heroTitle}>{headline}</h1>
         </div>
-        {periodSelector}
+        <div className={styles.heroActions}>
+          {periodSelector}
+          <Link to="/analyze" className={buttonClassName('primary', 'md')}>
+            Analyze a Call
+          </Link>
+        </div>
       </section>
 
       {!hasCalls ? (
@@ -215,20 +222,66 @@ export default function Overview() {
       ) : (
         <>
           <div className={styles.kpiGrid}>
-            {KPI_CARDS.map((card) => {
-              const metric = data.kpis[card.key]
-              const Icon = card.icon
-              return (
-                <MetricCard
+            {PRIMARY_KPIS.map((card) => (
+              <KpiCard
+                key={card.key}
+                metricKey={card.key}
+                metric={data.kpis[card.key]}
+                label={card.label}
+                format={card.format}
+                icon={<card.icon size={16} />}
+              />
+            ))}
+            <KpiCard
+              metricKey="follow_up"
+              metric={followUpMetric}
+              label="Follow-up Needed"
+              format="count"
+              icon={<AlertIcon size={16} />}
+              context="Open conversations, no decision yet"
+            />
+          </div>
+
+          <div>
+            <p className={styles.supportingLabel}>Supporting metrics</p>
+            <div className={styles.supportingGrid}>
+              {SUPPORTING_KPIS.map((card) => (
+                <KpiCard
                   key={card.key}
-                  icon={<Icon size={16} />}
-                  tone={card.tone as MetricCardTone}
+                  metricKey={card.key}
+                  metric={data.kpis[card.key]}
                   label={card.label}
-                  value={formatValue(metric, card.format)}
-                  helpText={formatComparison(metric, card.format)}
+                  format={card.format}
+                  variant="supporting"
                 />
-              )
-            })}
+              ))}
+            </div>
+          </div>
+
+          <div className={styles.sectionRow}>
+            <SectionCard title="Outcome Distribution" subtitle="Every analyzed call in this period, by outcome">
+              <DonutChart
+                slices={outcomeSlices(data)}
+                centerValue={String(data.kpis.calls_analyzed.current_value ?? 0)}
+                centerLabel="calls"
+              />
+            </SectionCard>
+
+            <SectionCard
+              title="Close Rate Trend"
+              subtitle={`${period === '7d' ? 'Daily' : 'Weekly'} buckets, fixed 0–100% scale`}
+            >
+              <PeriodTrendChart
+                buckets={data.close_rate_trend.map((bucket) => ({
+                  label: bucket.start_date.slice(5),
+                  value: bucket.close_rate,
+                  sampleSize: bucket.known_outcomes,
+                }))}
+                max={100}
+                unit="%"
+                ariaLabel="Close rate by period, fixed 0 to 100 percent scale"
+              />
+            </SectionCard>
           </div>
 
           <div className={styles.columns}>
@@ -240,7 +293,7 @@ export default function Overview() {
               {data.attention_calls.length > 0 ? (
                 <div className={styles.list}>
                   {data.attention_calls.map((call) => (
-                    <AttentionRow call={call} key={call.call_id} onOpen={openCall} />
+                    <AttentionRow call={call} key={call.call_id} />
                   ))}
                 </div>
               ) : (
@@ -256,7 +309,7 @@ export default function Overview() {
               {data.recent_calls.length > 0 ? (
                 <div className={styles.list}>
                   {data.recent_calls.map((call) => (
-                    <RecentRow call={call} key={call.call_id} onOpen={openCall} />
+                    <RecentRow call={call} key={call.call_id} />
                   ))}
                 </div>
               ) : (
@@ -265,30 +318,7 @@ export default function Overview() {
             </SectionCard>
           </div>
 
-          <SectionCard title="Close Rate Trend" subtitle={`Four buckets across the last ${period === '7d' ? '7' : '30'} days`}>
-            <TrendSparkline
-              data={data.close_rate_trend.map((bucket) => ({
-                date: bucket.start_date,
-                value: bucket.close_rate ?? 0,
-              }))}
-              formatValue={(v) => `${v}% close rate`}
-            />
-            <div className={styles.trendLegend}>
-              {data.close_rate_trend.map((bucket) => (
-                <div className={styles.trendBucket} key={bucket.label}>
-                  <span className={styles.trendBucketLabel}>{bucket.start_date}</span>
-                  <span className={styles.trendBucketValue}>
-                    {bucket.close_rate === null ? '—' : `${bucket.close_rate}%`}
-                  </span>
-                  <span className={styles.trendBucketMeta}>
-                    {bucket.sales}/{bucket.known_outcomes} sold
-                  </span>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-
-          <SectionCard title="Improved Agents" subtitle="At least 2 calls in each period, and a +0.2 or better gain">
+          <SectionCard title="Improved Representatives" subtitle="At least 2 calls in each period, and a +0.2 or better gain">
             {data.improved_agents.length > 0 ? (
               <div className={styles.improvedList}>
                 {data.improved_agents.map((agent) => (

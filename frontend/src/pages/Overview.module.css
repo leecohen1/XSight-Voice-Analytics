@@ -57,6 +57,22 @@
   z-index: 1;
 }
 
+.heroActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+@media (max-width: 900px) {
+  .heroActions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+}
+
 @media (max-width: 900px) {
   .hero {
     flex-direction: column;
@@ -80,20 +96,54 @@
   border-left: 3px solid var(--color-status-review);
 }
 
+/* Four primary business KPIs -- the number that divides evenly, so the
+   grid never leaves a half-empty row the way the old 6-card grid did. */
 .kpiGrid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--space-4);
 }
 
+/* Supporting metrics get their own, visually quieter row beneath the
+   primary one so they cannot compete with it. */
+.supportingGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+
+.supportingLabel {
+  font-family: var(--font-instrument);
+  font-size: var(--text-xs);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-2);
+}
+
 @media (max-width: 900px) {
-  .kpiGrid {
+  .kpiGrid,
+  .supportingGrid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (max-width: 480px) {
-  .kpiGrid {
+  .kpiGrid,
+  .supportingGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sectionRow {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) 2fr;
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+@media (max-width: 900px) {
+  .sectionRow {
     grid-template-columns: 1fr;
   }
 }
@@ -172,6 +222,8 @@
 
 /* ---- attention & recent rows ---- */
 
+/* Real <Link>s, not <button onClick>s -- a manager can open in a new tab,
+   copy the URL, or use normal browser back/forward navigation. */
 .attentionRow,
 .recentRow {
   display: flex;
@@ -184,6 +236,8 @@
   background: transparent;
   font-family: inherit;
   text-align: left;
+  text-decoration: none;
+  color: inherit;
   cursor: pointer;
   transition: background 0.15s ease;
 }

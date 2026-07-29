@@ -112,11 +112,26 @@ export interface DataQuality {
   previous_period_records: number
 }
 
+/**
+ * Outcome mix for the selected period. The five buckets always sum to
+ * `kpis.calls_analyzed.current_value` for the same window -- a call with no
+ * recorded outcome counts under `unknown` rather than being dropped, so a
+ * donut built from this can always be reconciled against the headline KPI.
+ */
+export interface OutcomeDistribution {
+  sale: number
+  no_sale: number
+  follow_up: number
+  uncertain: number
+  unknown: number
+}
+
 export interface OverviewSummary {
   period: PeriodWindow
   generated_at: string
   executive_summary: string
   kpis: OverviewKpis
+  outcome_distribution: OutcomeDistribution
   close_rate_trend: TrendBucket[]
   improved_agents: ImprovedAgent[]
   attention_calls: AttentionCall[]
