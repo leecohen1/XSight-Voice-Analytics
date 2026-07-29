@@ -294,6 +294,26 @@ Each fix was applied directly to the live workflow via the n8n MCP tools and re-
 
 **Remaining known limitations (unchanged, already disclosed in every pipeline response's own `limitations` field):** post-transcription content guardrails are enforced by an inline n8n deterministic Code node, not `guardrails_service` (which still only implements the `pre_transcription` stage); `POST /check/output` is not implemented, so the Final Analysis Chain's output is not independently guardrail-checked; NeMo Guardrails is not integrated anywhere; the Call Signal Analyser and LangGraph reasoning remain deterministic/rule-based (no trained PyTorch model, no LLM call inside LangGraph); all four backend services and the n8n webhook are reachable with no authentication (an explicit, accepted decision for this demo, not yet remediated). A full, evidence-based audit of these and other findings (dead code, dependency/security review, test coverage gaps) is recorded separately in `docs/FULL_PROJECT_AUDIT.md`.
 
+### Langfuse instrumentation — MVP wiring (cross-phase, ahead of the normal sequence)
+
+The user explicitly scoped this as a minimum-viable pass on top of the already-built `ai_observability_service` foundation (Phase 1/1C — write-path API, Langfuse client wrapper, query adapter, trace recorder, metadata allow-listing, 129 tests, and the design doc above) — no redesign of that foundation, no new APIs, no EC2 deployment, no RAGAS/eval/reranker work, success-path tracing only across exactly 6 stages (`transcription`, `information_extraction`, `rag_retrieval`, `call_signal_analysis`, `langgraph_reasoning`, `final_analysis`), narrower than the design doc's fuller 8-row table.
+
+**n8n wiring (live workflow `RBII7JvRDFWwy98x`, edited via the n8n MCP tools, then re-synced to `n8n/workflows/phase9_16_full_pipeline_intake_to_final_analysis.json`):** 10 existing nodes each gained one or two extra fields (a `call_id` assignment on `Capture Start Time`; per-stage `*_started_at_ms`/`*_completed_at_ms` timestamps threaded through `Normalize Transcript`, `Post-Transcription Content Check`, `Parse Gemini Extraction`, `Prepare Downstream Payloads`, `Prepare RAG For Merge`, `Prepare Signal For Merge`, `Prepare LangGraph Payload`, `Assemble Final Analysis Context`, `Parse Final Analysis Output`; a defensive `extractUsage()` helper on the two Gemini parse nodes, mirroring the existing duplicated `extractText`/`parseJsonLoose` convention) — no node was restructured, renamed, or moved. Two new nodes were added: `Build Observability Events` (assembles the 6-event batch via `$('Node Name').item.json` cross-references, the same pattern already used throughout this workflow) and `HTTP Request - Observability Events` (`onError: continueErrorOutput`, no retries), wired as a second, parallel output of `Router - Confidence and Category` alongside the existing `Build Success Response - Full Analysis` — never gating the real response.
+
+**Verification before touching the live, already-demo-verified workflow:** the exact JS to be pasted was spliced directly out of the live/local node source (not retyped) and dry-run in a standalone Node.js harness against realistic mocked upstream data before ever reaching n8n, catching latency-math and contract-shape issues locally first. After applying the 14 operations, `test_workflow` (the same simulated-execution technique already used for this workflow's earlier verified runs, executions 15/16) was run twice — the second time with realistic mock utterances covering actual sales content (the first attempt's sparse test transcript was correctly rejected by the unchanged off-topic guardrail check, confirming that check still works, not a regression). The verified run showed the user-facing response byte-identical to before, and `Build Observability Events` producing a fully correct 6-event payload with real latencies and honest `null`s for `model`/tokens where the data genuinely isn't exposed (confirmed from the real Gemini node's actual output schema — no `usageMetadata` field exists in this n8n Gemini node version's output at all, so nothing is estimated to fill the gap).
+
+**Real Langfuse account created and validated (2026-07-28):** the user added real `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` to a local, gitignored `services/ai_observability_service/.env` (never pasted into chat, never committed). Running the service locally against the real account surfaced two genuine SDK-integration bugs in the "foundation only" write path, both root-caused against the actual installed SDK (`langfuse==4.14.1`, its real method list enumerated via `dir()`, not guessed) and fixed:
+1. `app/langfuse_client.py`'s `update_trace_attributes` called a nonexistent `client.update_current_trace(...)` — every call failed safely (caught, logged, never raised — "must never fail the workflow" held throughout) but never actually named/tagged the trace. Fixed by creating a small root span carrying the sanitized trace metadata instead, since this OTel-based SDK derives a trace's display attributes from its root span rather than exposing a separate trace-level setter.
+2. `app/langfuse_query_adapter.py`'s `fetch_observations` passed `period_start`/`period_end` as raw strings where the SDK requires actual `datetime` objects — fixed by reusing the already-existing `app/time_utils.parse_utc`.
+
+One existing test (`test_fetch_observations_calls_api_with_trace_id`) used placeholder date strings (`"a"`/`"b"`) that no longer parse now that real conversion happens — updated to valid ISO timestamps; `test_langfuse_client.py`'s trace-metadata test updated to assert on the new root-span-based mechanism. Full suite re-run: **129/129 passing**, no regressions.
+
+**Confirmed working via a real write, cross-checked directly against Langfuse's own public trace API** (bypassing this project's own read endpoints, which have separate, unfixed issues — see below): one trace, 7 observations (the 6 real pipeline stages plus the trace-naming span), correct span/generation classification, real computed latencies, tokens correctly `null` where genuinely unavailable, cost correctly `null` (no `pricing_config` seeded — expected, not a bug). One cosmetic gap not chased further (out of scope, "don't over-engineer"): because the 6 stage observations are siblings rather than nested under the naming span, Langfuse's own trace-name derivation doesn't reliably pick "xsight-call-analysis" as the trace's displayed name.
+
+**Found, explicitly not fixed (out of scope for this pass — read/dashboard path, not write/instrumentation):** while validating, three further real bugs surfaced in `ai_observability_service`'s read path, now documented as specifics in its README rather than the previous vague "not yet live-verified": `fetch_metrics`'s call shape doesn't match the real Metrics API v2 (`query: str`, not separate kwargs); `normalize_call_list`/`observability_call_detail` call `.get()` on what the real SDK returns as typed pydantic objects, not dicts; and `observability_call_detail`'s `0001`–`9999` "no filter" sentinel dates overflow Langfuse's ClickHouse backend. None of these affect the write path or the "one complete trace" deliverable — fixing them is real, separate follow-up work for whoever builds the "AI Usage & Cost" dashboard.
+
+**Explicitly deferred, per the user's own scope cuts, not forgotten:** error-path tracing (only a successful pipeline run produces a trace today); deploying `ai_observability_service` anywhere n8n Cloud can reach (`HTTP Request - Observability Events`'s URL is a clearly-marked placeholder — every real execution's observability call fails harmlessly with a network error via `onError: continueErrorOutput` until this is deployed); seeding real `pricing_config` rows (cost stays `null` until then — correct, not fabricated). Not committed to git — awaiting user review, per explicit instruction.
+
 ### Overview vertical slice — S3 business persistence + real Overview screen (cross-phase)
 
 Closed the gap the Overview audit identified: the pipeline analyzed calls and
@@ -395,3 +415,67 @@ authentication was added, consistent with the project's documented demo
 posture.
 
 Full documentation: `docs/overview/01_Audit.md` through `05_Completion_Report.md`.
+
+## Phase 1.1 — Executive UX Redesign
+
+Stable pre-redesign baseline tagged `phase1-stable-pre-ux-redesign`
+(commit `779fd96`), work continuing on `feat/phase1-1-executive-ux-redesign`.
+
+**Design system** (`frontend/src/analytics/kpiSemantics.ts`,
+`executiveSummary.ts`): KPI colour/trend direction is now derived from what a
+metric *means* (a falling "Needs Attention" count is good news, a falling
+close rate is bad news), not from a card's position in a grid. Dashboard
+headlines are generated by deterministic pure functions, never an LLM, so
+they can never drift from the numbers rendered beside them.
+
+**Overview**: added `outcome_distribution` to `GET /overview` (backend:
+`services/call_data_service/app/aggregation.py` /
+`models.py::OutcomeDistribution`) — a small, additive, backward-compatible
+contract extension, not a redesign of the aggregation architecture. The
+close-rate trend moved from an auto-scaled sparkline to a fixed-domain
+`PeriodTrendChart` with visible per-bucket sample size.
+
+**Analyze Call**: the four-stage progress tracker was replaced. It implied
+live backend stage tracking the frontend never had — `uploadCall` is a single
+blocking request, so the tracker sat frozen on "Uploaded" for the entire
+60–90s wait. Replaced with one honest indeterminate state (elapsed timer +
+a message that escalates by elapsed time, never by claimed stage).
+
+**Calls**: added `analytics/callGrouping.ts` (sort orders, representative
+grouping) operating over the complete fetched set from `listCalls()`. Raw
+call UUIDs are no longer a visible table column — moved to the row's `title`
+attribute, Call Details, and copied URLs.
+
+**Call Details — three removals worth flagging explicitly, since none of
+them are code deletions, only un-wiring from this screen:**
+- **AI Processing Cost, Quality Evaluation (RAGAS), Ask XSight** are no
+  longer rendered on Call Details. Their data comes from
+  `aiOperationsApi`/`askXsightApi`, which are documented mock-only modules —
+  `VITE_USE_MOCK=false` (the real deployed config) made them throw, silently
+  caught, so every real call showed three permanently-empty collapsed
+  sections. The components and their mock-backed APIs are untouched and
+  ready to reconnect once `services/usage_monitoring_service` (or an
+  equivalent) exists; they remain future modules, not deleted work.
+- **The "Reasoning" evidence meter, and the RAG Insight / Evidence Conflicts
+  / LangGraph Reasoning Steps sections** were removed from
+  `EvidenceSection.tsx`. `toCallRecord` (`services/callsApi.ts`) never
+  populates `ragInsight`, `langgraphReasoningSteps` or
+  `langgraphEvidenceConflicts` on a real record — the stored schema doesn't
+  carry LangGraph's raw reasoning output at all (the Final Analysis Chain
+  folds it into `coaching_feedback`/`recommended_next_action` instead, per
+  the documented architecture). A meter over an always-empty array always
+  read zero, which falsely implied LangGraph contributed nothing to a call
+  it plainly shaped.
+- **`humanReviewReasons` was never populated** anywhere in the app — a dead
+  prop. `CallDetails.tsx` now passes `call.routerReasons` instead (identical
+  type shape: `HumanReviewReason = RouterReason`), which is the field the
+  backend's `router_reasons` actually flows into. `HumanReviewBanner` leads
+  with a "Why review is required" bullet list built from these real reasons.
+
+Call Outcome now gets its own large "Business Outcome" hero line; the
+internal `routing_category` moved out of the badge row into a small,
+humanized ("Category: Pricing negotiation and followup", not raw
+snake_case) metadata line. The breadcrumb no longer repeats the raw call
+UUID (shown once, in the header meta line) — its last segment now matches
+the H1's human-readable agent/customer name, the standard breadcrumb
+convention.

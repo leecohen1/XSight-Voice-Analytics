@@ -16,12 +16,19 @@ export interface HumanReviewBannerProps {
 
 /**
  * Loud, top-of-panel banner reflecting guardrail_status — never buried.
- * For flagged/human_review_required, limitations and the specific router
- * reasons are shown inline rather than left for the user to hunt down.
+ *
+ * A human-review or flagged result is a valid analytical outcome, not a
+ * system failure, so it gets a "Why review is required" bullet list as the
+ * lead content: each of the Router's specific reasons (e.g. "Low
+ * confidence", "Evidence conflict"), one per line, scannable in a glance
+ * rather than buried in prose. The freeform `limitations` narrative is kept
+ * as supporting detail underneath, and as the sole content on the rare case
+ * the Router recorded no machine-readable reason at all.
  */
 export default function HumanReviewBanner({ guardrailStatus, limitations, humanReviewReasons }: HumanReviewBannerProps) {
   const copy = COPY[guardrailStatus]
   const isUrgent = guardrailStatus !== 'pass'
+  const reasons = humanReviewReasons ?? []
 
   return (
     <div className={[styles.banner, copy.className].join(' ')} role={isUrgent ? 'alert' : 'status'}>
@@ -29,14 +36,19 @@ export default function HumanReviewBanner({ guardrailStatus, limitations, humanR
         <copy.Icon size={16} />
         {copy.label}
       </div>
-      {isUrgent && limitations && <p className={styles.detail}>{limitations}</p>}
-      {isUrgent && humanReviewReasons && humanReviewReasons.length > 0 && (
-        <ul className={styles.reasonList}>
-          {humanReviewReasons.map((reason) => (
-            <li key={reason.code}>{reason.detail}</li>
-          ))}
-        </ul>
+
+      {isUrgent && reasons.length > 0 && (
+        <>
+          <span className={styles.reasonHeading}>Why review is required</span>
+          <ul className={styles.reasonList}>
+            {reasons.map((reason) => (
+              <li key={reason.code}>{reason.label}: {reason.detail}</li>
+            ))}
+          </ul>
+        </>
       )}
+
+      {isUrgent && limitations && <p className={styles.detail}>{limitations}</p>}
     </div>
   )
 }
