@@ -126,3 +126,13 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+## ==============================
+## Claude Code tooling (synced skill caches and personal local settings --
+## not project code; frontend/.claude/settings.json is intentionally
+## tracked since it's shared project config, not a cache)
+## ==============================
+/.claude/
+/.agents/
+**/.claude/settings.local.json
+skills-lock.json
