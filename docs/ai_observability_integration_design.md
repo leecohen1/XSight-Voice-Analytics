@@ -1,7 +1,18 @@
 # AI Observability Integration Design (Phase 1C)
 
-**Status: design document only. No live n8n workflow edits have been made
-as part of this work.** This document maps how `ai_observability_service`
+**Status update (2026-07-28): implemented, success-path only, scope cut
+from this document.** The wiring described below (section 4) has since
+been built into the live workflow — see `docs/PROGRESS.md`'s "Langfuse
+instrumentation — MVP wiring" entry for exactly what changed, what was
+deliberately cut (error-path tracing, EC2 deployment, all 8 n8n stages
+below narrowed to the 6 the implementation task fixed), and two real
+Langfuse-SDK integration bugs found and fixed while validating against a
+real account. The rest of this document is kept as the original design
+record and is **not** rewritten to match the smaller implemented scope —
+read it as history, and read `docs/PROGRESS.md` for current state.
+
+**Original status: design document only. No live n8n workflow edits have
+been made as part of this work.** This document maps how `ai_observability_service`
 (component: standalone "AI Usage, Token, and Cost Monitoring" backend, see
 `services/ai_observability_service/README.md`) would integrate with the
 live n8n pipeline (`n8n/workflows/phase9_16_full_pipeline_intake_to_final_analysis.json`,

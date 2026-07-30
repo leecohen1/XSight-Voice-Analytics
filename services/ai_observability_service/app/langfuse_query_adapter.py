@@ -29,6 +29,7 @@ import logging
 from typing import Any, Optional
 
 from app.langfuse_client import ObservabilityClient
+from app.time_utils import parse_utc
 
 logger = logging.getLogger("ai_observability_service")
 
@@ -75,7 +76,7 @@ class LangfuseQueryClient:
             return None
         try:
             result = self._api.observations.get_many(
-                from_start_time=period_start, to_start_time=period_end, trace_id=trace_id, limit=limit
+                from_start_time=parse_utc(period_start), to_start_time=parse_utc(period_end), trace_id=trace_id, limit=limit
             )
             return getattr(result, "data", result)
         except Exception:

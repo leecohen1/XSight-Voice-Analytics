@@ -104,7 +104,9 @@ def test_fetch_metrics_calls_api_with_period_and_dimensions():
 def test_fetch_observations_calls_api_with_trace_id():
     api = _WorkingApi()
     client = LangfuseQueryClient(_FakeObservabilityClient(enabled=True, api=api))
-    result = client.fetch_observations(period_start="a", period_end="b", trace_id="call-1")
+    result = client.fetch_observations(
+        period_start="2026-01-01T00:00:00+00:00", period_end="2026-02-01T00:00:00+00:00", trace_id="call-1"
+    )
     assert result == [{"trace_id": "call-1"}]
     assert api.observations_calls[0]["trace_id"] == "call-1"
 

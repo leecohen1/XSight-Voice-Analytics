@@ -221,6 +221,9 @@ def test_enabled_client_failed_status_sets_error_level():
 
 
 def test_enabled_client_update_trace_attributes_sanitizes_trace_metadata():
+    """The installed SDK (v4.14.1) has no update_current_trace-style call --
+    trace-level name/metadata are set via a small root span instead (see
+    ObservabilityClient.update_trace_attributes' docstring)."""
     sdk = _FakeSdkClient()
     client = ObservabilityClient(client=sdk, enabled=True)
     ok = client.update_trace_attributes(
@@ -230,8 +233,11 @@ def test_enabled_client_update_trace_attributes_sanitizes_trace_metadata():
         metadata={"call_id": "call-1", "customer_name": "should be stripped"},
     )
     assert ok is True
-    recorded = sdk.trace_updates[0]["metadata"]
-    assert recorded == {"call_id": "call-1"}
+    assert sdk.observation_calls[0]["as_type"] == "span"
+    assert sdk.observation_calls[0]["name"] == "xsight-call-analysis"
+    assert sdk.observation_calls[0]["trace_context"] == {"trace_id": "t1"}
+    recorded = sdk._next_observation.updates[0]["metadata"]
+    assert recorded == {"call_id": "call-1", "tags": ["env:development"]}
 
 
 def test_enabled_client_create_score_is_idempotent_by_score_id():

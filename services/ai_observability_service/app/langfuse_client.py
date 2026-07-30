@@ -183,16 +183,28 @@ class ObservabilityClient:
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> bool:
-        """Sets trace-level fields (as opposed to a single observation's
-        own input/output). Must be called from within the trace's root
-        span context. Returns True iff it succeeded; never raises."""
+        """Sets trace-level fields (name + metadata) by creating a small,
+        immediately-closed root span under `trace_id` before the real stage
+        spans/generations are recorded. The installed Langfuse SDK
+        (v4.14.1) has no `update_current_trace`-style call that can set
+        trace-level attributes from outside an active observation context
+        (confirmed against the SDK's actual public surface — no such method
+        exists) — Langfuse's OTel-based v4 client derives a trace's display
+        name/metadata from its root span, not a separate trace entity. This
+        span is that root: named after the trace, carrying the sanitized
+        metadata and tags (tags aren't a supported field on span metadata,
+        so they're folded into it as an allow-listed `tags` list). Returns
+        True iff it succeeded; never raises."""
         if not self.enabled or self._client is None:
             return False
         try:
             sanitized_metadata, _ = sanitize_metadata(metadata or {}, TRACE_METADATA_ALLOWED_KEYS)
-            self._client.update_current_trace(
-                name=name, tags=tags or [], metadata=sanitized_metadata, session_id=session_id, user_id=user_id
-            )
+            if tags:
+                sanitized_metadata = {**sanitized_metadata, "tags": tags}
+            with self._client.start_as_current_observation(
+                as_type="span", name=name, trace_context={"trace_id": trace_id}
+            ) as span:
+                span.update(metadata=sanitized_metadata)
             return True
         except Exception:
             logger.exception("Langfuse update_trace_attributes failed for trace_id=%s", trace_id)

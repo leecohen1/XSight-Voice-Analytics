@@ -38,16 +38,20 @@ design:
   keep their exact prior field names — only *where the numbers come from*
   changed, not what the frontend will eventually receive.
 
-**Current status: foundation only, not live-integrated.** No real Langfuse
-account has been created as part of this work. `LANGFUSE_PUBLIC_KEY` /
-`LANGFUSE_SECRET_KEY` are unset placeholders in `.env.example`, and every
-code path in this service is written to behave correctly — never crash,
-never fabricate a number — whether or not those credentials are ever
-configured (see `app/langfuse_client.py`'s "disabled mode"). The
-Metrics/Observations API calls in `app/langfuse_query_adapter.py` are
-structurally ready against the current, confirmed Langfuse Python SDK v4
-API surface, but have never been exercised against a real Langfuse
-project — see "Known limitations."
+**Current status: write path live-integrated and verified (2026-07-28);
+read path still foundation-only.** A real Langfuse account now exists (a
+local, gitignored `.env` holds real credentials — never committed;
+`.env.example` keeps unset placeholders for anyone else setting this up).
+Every code path in this service still behaves correctly — never crash,
+never fabricate a number — whether or not credentials are configured (see
+`app/langfuse_client.py`'s "disabled mode"), but that is no longer just a
+design intention: the write path (`POST /observability/events`) has been
+exercised against the real account and confirmed to produce one real,
+correctly-shaped trace. The read path
+(`app/langfuse_query_adapter.py`'s `fetch_metrics`/`fetch_observations`/
+`fetch_scores` and the `/observability/*` GET endpoints built on them) is
+still not reliably working against a real project — see "Known
+limitations" for the three specific, confirmed issues.
 
 ## Cost terminology (read this before trusting any number from this service)
 
@@ -219,12 +223,78 @@ call content.
 
 ## Known limitations
 
-- **No real Langfuse account exists yet.** `LANGFUSE_PUBLIC_KEY`/
-  `LANGFUSE_SECRET_KEY` are unset; every code path runs in "disabled mode"
-  in this repository's current state. `app/langfuse_query_adapter.py`'s
-  `fetch_metrics`/`fetch_observations`/`fetch_scores` are structurally
-  built against the current documented Langfuse Python SDK v4 API surface
-  but are **not yet live-verified** against a real project.
+- **Wired into the n8n workflow, success path only (2026-07-28).** The live
+  workflow (`RBII7JvRDFWwy98x`) now mints a `call_id`, captures per-stage
+  timestamps on 10 existing nodes, and has a new `Build Observability
+  Events` + `HTTP Request - Observability Events` branch that POSTs one
+  batch of the 6 major-stage events (`transcription`, `information_extraction`,
+  `rag_retrieval`, `call_signal_analysis`, `langgraph_reasoning`,
+  `final_analysis`) in parallel with the real response — see
+  `docs/PROGRESS.md`'s "Langfuse instrumentation — MVP wiring" entry.
+  **Not wired for the error path** (a failed pipeline run today produces no
+  trace) — an intentional scope cut, not an oversight. The HTTP node's URL
+  is still a placeholder (`REPLACE_WITH_AI_OBSERVABILITY_SERVICE_URL`) —
+  this service is not deployed anywhere n8n Cloud can reach yet (no EC2
+  deployment in this pass, per explicit instruction), so every real
+  execution's observability call fails with a network error today —
+  harmlessly, by design (`onError: continueErrorOutput`).
+- **A real Langfuse account now exists and was used to validate the write
+  path (2026-07-28).** `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set
+  in a local, gitignored `.env` (never committed). Validating against it
+  surfaced two real bugs in this module, both fixed:
+  1. `app/langfuse_client.py`'s `update_trace_attributes` called
+     `client.update_current_trace(...)`, a method that does not exist
+     anywhere on the installed SDK (`langfuse==4.14.1`) — confirmed by
+     enumerating the real client's public methods, not guessed. Every
+     call failed (caught, logged, harmless — "never fail the workflow"
+     held), but the trace never got a name/metadata. Fixed by creating a
+     small, immediately-closed root span carrying the sanitized
+     trace-level metadata + tags instead, since this SDK derives a
+     trace's display attributes from its root span rather than exposing a
+     separate "current trace" setter. One side effect: because the 6
+     stage spans/generations are recorded as siblings (not nested under
+     this span), Langfuse's own trace-name derivation doesn't reliably
+     pick this span's name for the trace — a cosmetic gap, not a
+     functional one (all 7 observations, including all 6 real pipeline
+     stages, are confirmed present and correctly attributed under one
+     trace via Langfuse's own public trace API).
+  2. `app/langfuse_query_adapter.py`'s `fetch_observations` passed
+     `period_start`/`period_end` as raw strings to
+     `client.api.observations.get_many(from_start_time=, to_start_time=)`,
+     but that SDK parameter requires an actual `datetime` — every real
+     call raised inside the SDK's own serializer. Fixed by parsing with
+     the already-existing `app/time_utils.parse_utc`.
+  **Confirmed working via a real write + a direct query against Langfuse's
+  own public trace API** (bypassing this project's own read endpoints):
+  one trace, 7 observations (the 6 real pipeline stages + the trace-naming
+  span), correct span/generation classification, real latencies, tokens
+  `null` where the Gemini node genuinely doesn't expose usage data (not
+  estimated), cost `null` (no `pricing_config` seeded — expected).
+- **This service's own read endpoints (`/observability/summary`,
+  `/observability/daily`, `/observability/by-stage`, `/observability/by-provider`,
+  `/observability/calls`, `/observability/calls/{id}`) are still broken
+  against a real Langfuse account — found, not fixed, in this pass** (out
+  of scope: this task was write-path/instrumentation only). Three distinct
+  issues, beyond the one `fetch_observations` bug fixed above:
+  1. `fetch_metrics`'s real signature is `metrics(query: str, ...)` — a
+     single JSON-encoded query string per Langfuse's Metrics API v2 — not
+     the `from_timestamp=`/`to_timestamp=`/`dimensions=` kwargs this
+     module currently calls it with. Every `fetch_metrics` call would
+     raise a `TypeError` against a real account (never exercised until
+     now, since the test suite mocks the SDK entirely).
+  2. `normalize_call_list` and `observability_call_detail` call `.get(...)`
+     on each returned observation, but the real SDK returns typed pydantic
+     model instances (`ObservationV2`), not dicts — `.get()` raises
+     `AttributeError` against real data.
+  3. `observability_call_detail`'s "no date filter" sentinel
+     (`0001-01-01`…`9999-01-01`) parses fine in Python but overflows
+     Langfuse's ClickHouse backend (`DateTime64 convert overflow`) once
+     actually sent over the wire.
+  Rewriting the Metrics API v2 query builder and the pydantic-object
+  normalization is a real, separate body of work — deliberately not done
+  here to avoid redesigning/over-engineering beyond this task's scope. Any
+  future pass building the "AI Usage & Cost" dashboard needs to fix these
+  first.
 - **No real pricing data is seeded.** `pricing_config` and
   `infrastructure_cost_config` are empty until populated with real,
   cited provider prices (a manual data-entry step, deliberately kept
@@ -234,12 +304,6 @@ call content.
   `None` (never fabricated as `0`) in every read endpoint's response today,
   pending live Langfuse integration; only `allocated_fixed_cost_usd` (from
   the still-locally-owned `infrastructure_cost_config`) is populated.
-- **Not wired into the n8n workflow yet.** This is a standalone backend
-  service only. The frozen main analysis workflow does not call
-  `POST /observability/events` — that integration is designed (see
-  `docs/ai_observability_integration_design.md`, Phase 1C) but not yet
-  implemented against the live workflow. **Do not treat n8n integration as
-  complete** — it does not exist yet.
 - **RAGAS is not implemented.** The schema (`use_case`, `pipeline_stage`
   as free-form-but-conventioned strings) is deliberately generic enough to
   accept a future RAGAS evaluation run as just another `provider`/`service`
