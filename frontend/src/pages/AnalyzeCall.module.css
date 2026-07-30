@@ -109,6 +109,50 @@
   color: var(--color-text-muted);
 }
 
+/* Session-scoped local playback of the selected file -- not the uploaded
+   recording coming back from anywhere, so it sits visually inside the
+   submission card rather than looking like a result. */
+.audioPreview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-elevated);
+}
+
+.audioPreviewMeta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.audioPreviewLabel {
+  font-family: var(--font-instrument);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--color-text-muted);
+}
+
+.audioPreviewFile {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.audioPreviewPlayer {
+  width: 100%;
+}
+
+.audioPreviewNote {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 .errorBanner {
   background: var(--color-status-danger-bg);
   border: 1px solid rgba(217, 83, 79, 0.3);

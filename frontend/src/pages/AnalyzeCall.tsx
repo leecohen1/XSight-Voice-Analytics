@@ -29,6 +29,18 @@ function humanizeStage(stage: string): string {
     .join(' ')
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`
+}
+
 function toFailureInfo(err: unknown): FailureInfo {
   if (err instanceof HttpError) {
     return {
@@ -56,9 +68,25 @@ export default function AnalyzeCall() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [failure, setFailure] = useState<FailureInfo | null>(null)
   const [persistenceWarning, setPersistenceWarning] = useState<string | null>(null)
+  const [audioObjectUrl, setAudioObjectUrl] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const waveformBars = useMemo(() => generateAmbientBars(48), [])
+
+  // The preview URL is derived from whichever file is currently selected --
+  // never uploaded a second time, just a local pointer into the browser's
+  // own copy of the file. The effect cleanup revokes the URL whenever
+  // audioFile changes (a replacement file, or removal to null) and on
+  // unmount, so no blob URL outlives the file it points to.
+  useEffect(() => {
+    if (!audioFile) {
+      setAudioObjectUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(audioFile)
+    setAudioObjectUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [audioFile])
 
   // Elapsed-time ticker for the processing state. The request itself has no
   // client-side timeout -- a valid AI analysis must never be aborted just
@@ -190,6 +218,25 @@ export default function AnalyzeCall() {
                 disabled={isSubmitting}
                 className="visually-hidden"
               />
+
+              {audioFile && audioObjectUrl && (
+                <div className={styles.audioPreview}>
+                  <div className={styles.audioPreviewMeta}>
+                    <span className={styles.audioPreviewLabel}>Call recording</span>
+                    <span className={styles.audioPreviewFile}>
+                      {audioFile.name} · {formatFileSize(audioFile.size)}
+                    </span>
+                  </div>
+                  <audio
+                    controls
+                    preload="metadata"
+                    src={audioObjectUrl}
+                    aria-label={`Call recording playback: ${audioFile.name}`}
+                    className={styles.audioPreviewPlayer}
+                  />
+                  <p className={styles.audioPreviewNote}>Playback is available during this browser session.</p>
+                </div>
+              )}
             </div>
 
             <div className={styles.field}>
